@@ -1,0 +1,31 @@
+{
+  "name": "aqua",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "electron": "^45.0.0",
+    "is-electron-renderer": "^2.0.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^9.2.0",
+    "electron-builder": "^26.18.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.4",
+    "wait-on": "^8.0.4"
+  }
+}
