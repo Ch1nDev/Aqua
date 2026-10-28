@@ -1,19 +1,28 @@
 {
-  "name": "aqua",
+  "name": "aqua-launcher",
+  "productName": "Aqua Launcher",
   "version": "1.0.0",
+  "description": "A modern, lightweight Minecraft: Java Edition launcher.",
+  "author": "Aqua",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 5173 --strictPort",
+    "electron:dev": "concurrently -k -s first \"vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 && electron . --dev\"",
     "build": "tsc -b && vite build",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "electron-builder",
-    "preview": "vite preview"
+    "typecheck": "tsc -b",
+    "start": "npm run build && electron .",
+    "electron:build": "npm run build && electron-builder",
+    "package": "npm run build && electron-builder --dir",
+    "test": "node --test tests/*.test.js",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
+    "adm-zip": "^0.6.1",
     "electron": "^45.0.0",
-    "is-electron-renderer": "^2.0.1",
+    "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
@@ -24,8 +33,59 @@
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^9.2.0",
     "electron-builder": "^26.18.0",
+    "playwright-core": "^1.56.1",
     "typescript": "~6.0.3",
     "vite": "^8.3.4",
     "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.aqua.launcher",
+    "productName": "Aqua Launcher",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "build/icon.png"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "Aqua-Launcher-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Aqua Launcher"
+    },
+    "mac": {
+      "category": "public.app-category.games",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "category": "Game",
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

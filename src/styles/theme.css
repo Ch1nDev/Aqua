@@ -1,0 +1,598 @@
+/* ==========================================================================
+   Custom block theme
+   Settings → Appearance → Custom block theme paints the shell with a tiled
+   Minecraft block texture or a flat colour. The launcher provider sets the
+   --surface-* variables on <html>; with nothing enabled every layer stays at
+   zero opacity and the stock theme shows through.
+   ========================================================================== */
+.sidebar::before,
+.titlebar::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: '';
+  background-repeat: no-repeat, repeat;
+  image-rendering: pixelated;
+  transition: opacity 200ms var(--ease);
+}
+
+.sidebar::before {
+  opacity: var(--surface-sidebar-opacity, 0);
+  background-color: var(--surface-sidebar-color, transparent);
+  background-image:
+    linear-gradient(
+      rgba(6, 10, 14, var(--surface-sidebar-scrim, 0)),
+      rgba(6, 10, 14, var(--surface-sidebar-scrim, 0))
+    ),
+    var(--surface-sidebar-image, none);
+  background-size: auto, var(--surface-sidebar-size, 48px);
+}
+
+.titlebar::before {
+  opacity: var(--surface-titlebar-opacity, 0);
+  background-color: var(--surface-titlebar-color, transparent);
+  background-image:
+    linear-gradient(
+      rgba(6, 10, 14, var(--surface-titlebar-scrim, 0)),
+      rgba(6, 10, 14, var(--surface-titlebar-scrim, 0))
+    ),
+    var(--surface-titlebar-image, none);
+  background-size: auto, var(--surface-titlebar-size, 40px);
+}
+
+.app-shell::after {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+  opacity: var(--surface-backdrop-opacity, 0);
+  background-color: var(--surface-backdrop-color, transparent);
+  background-image:
+    linear-gradient(
+      rgba(6, 10, 14, var(--surface-backdrop-scrim, 0)),
+      rgba(6, 10, 14, var(--surface-backdrop-scrim, 0))
+    ),
+    var(--surface-backdrop-image, none);
+  background-size: auto, var(--surface-backdrop-size, 96px);
+  background-repeat: no-repeat, repeat;
+  image-rendering: pixelated;
+}
+
+/* Block textures are busy by nature: a light drop shadow keeps labels legible
+   on grass, sand, and end stone without dimming the artwork. */
+html[data-custom-theme='true'] .sidebar,
+html[data-custom-theme='true'] .titlebar {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+/* Studio ------------------------------------------------------------------- */
+.theme-studio-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.theme-studio-toggle__copy {
+  min-width: 0;
+}
+
+.theme-studio-toggle__copy p {
+  margin-top: 3px;
+  color: var(--dim);
+  font-size: 9.5px;
+  line-height: 1.6;
+}
+
+.theme-studio {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.014);
+}
+
+.theme-studio__presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.theme-studio__label {
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.theme-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.theme-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 9.5px;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+
+.theme-preset:hover {
+  border-color: var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.theme-preset.is-selected {
+  border-color: var(--line-accent);
+  background: var(--accent-softer);
+  color: var(--text);
+}
+
+.theme-preset__swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background-size: 20px;
+  image-rendering: pixelated;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+/* Live preview ------------------------------------------------------------ */
+.theme-preview {
+  position: relative;
+  height: 132px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background:
+    radial-gradient(420px 260px at 80% -10%, rgba(40, 88, 118, 0.2), transparent 62%),
+    var(--bg);
+  isolation: isolate;
+}
+
+.theme-preview__backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+}
+
+.theme-preview__layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.theme-preview__titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 20px;
+  padding: 0 7px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(6, 10, 8, 0.74);
+}
+
+.theme-preview__brand {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.theme-preview__icon {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+}
+
+.theme-preview__controls {
+  position: relative;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.theme-preview__controls span {
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.theme-preview__body {
+  position: relative;
+  display: flex;
+  height: calc(100% - 20px);
+}
+
+.theme-preview__sidebar {
+  position: relative;
+  display: flex;
+  width: 92px;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 6px;
+  border-right: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(9, 15, 11, 0.9), rgba(6, 10, 8, 0.88));
+}
+
+.theme-preview__nav {
+  position: relative;
+  height: 9px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.theme-preview__nav.is-active {
+  width: 78%;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--line-accent);
+}
+
+.theme-preview__main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+}
+
+.theme-preview__heading {
+  display: block;
+  width: 52%;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--text-secondary);
+  opacity: 0.65;
+}
+
+.theme-preview__line {
+  display: block;
+  width: 74%;
+  height: 4px;
+  margin-top: 7px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.theme-preview__line--short {
+  width: 46%;
+}
+
+.theme-preview__button {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 3px 12px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Surface tabs and editor ------------------------------------------------- */
+.theme-studio__tabs {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-input);
+}
+
+.theme-studio__tab {
+  flex: 1;
+  padding: 7px 8px;
+  border-radius: 6px;
+  color: var(--dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  transition: background var(--transition), color var(--transition);
+}
+
+.theme-studio__tab small {
+  display: block;
+  overflow: hidden;
+  color: inherit;
+  font-size: 8px;
+  font-weight: 500;
+  opacity: 0.75;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-studio__tab:hover {
+  color: var(--text-secondary);
+}
+
+.theme-studio__tab.is-active {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+.theme-studio__editor {
+  margin-top: 12px;
+}
+
+.theme-studio__modes {
+  display: flex;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.theme-studio__modes button {
+  flex: 1;
+}
+
+.block-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 190px;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.block-picker__label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--dim);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.block-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 28px);
+  gap: 4px;
+}
+
+.block-tile {
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-input);
+  transition: border-color var(--transition), transform var(--transition);
+}
+
+.block-tile:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.block-tile.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.block-tile__texture {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background-size: 16px;
+  image-rendering: pixelated;
+}
+
+.theme-color {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.theme-color__input {
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.theme-color__input::-webkit-color-swatch-wrapper {
+  padding: 3px;
+}
+
+.theme-color__input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 3px;
+}
+
+.theme-color__swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.theme-color__swatch {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  transition: box-shadow var(--transition), transform var(--transition);
+}
+
+.theme-color__swatch:hover {
+  transform: translateY(-1px);
+}
+
+.theme-color__swatch.is-selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.theme-color__hex {
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.theme-slider {
+  margin-top: 12px;
+}
+
+.theme-slider .field__label {
+  margin-bottom: 0;
+}
+
+.theme-slider input[type='range'] {
+  margin: 9px 0 3px;
+}
+
+.theme-studio__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.theme-studio__hint {
+  color: var(--dim);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.theme-studio--notice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.theme-studio--notice .callout {
+  margin: 0;
+}
+
+.theme-studio--notice .callout strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.theme-studio--notice .callout p {
+  margin-top: 3px;
+}
+
+.theme-studio__loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.theme-studio__notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.theme-studio__footer-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.accent-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  transition: border-color var(--transition);
+}
+
+.accent-swatch:hover {
+  border-color: var(--line-strong);
+}
+
+.accent-swatch span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+}
+
+.accent-swatch.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.accent-custom {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 31px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 9.5px;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.accent-custom:hover {
+  border-color: var(--line-strong);
+}
+
+.accent-custom.is-selected {
+  border-color: var(--line-accent);
+  background: var(--accent-softer);
+  color: var(--text-secondary);
+}
+
+.accent-custom input[type='color'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.theme-studio__accent {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 900px) {
+  .theme-preview {
+    height: 118px;
+  }
+
+  .theme-preview__sidebar {
+    width: 76px;
+  }
+}
