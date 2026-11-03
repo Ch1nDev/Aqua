@@ -23,7 +23,6 @@ import { contentTypeOption } from '../lib/contentTypes'
 import { formatBytes, relativeTime } from '../lib/format'
 import { FILTER_CATEGORIES, FILTER_ENVIRONMENTS, FILTER_LICENSES, FILTER_LOADERS, FILTER_SORTS } from '../lib/modrinthFilters'
 import { useLauncher } from '../state/LauncherProvider'
-import { BEDROCK_ENABLED, HORIZON_ENABLED } from '../lib/features'
 import type {
   ContentConflictsResult,
   ContentFilterEntry,
@@ -66,28 +65,24 @@ function EditionSwitch({
       >
         <Boxes /> Java Edition
       </button>
-      {HORIZON_ENABLED ? (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={edition === 'horizon'}
-          className={edition === 'horizon' ? 'is-active' : undefined}
-          onClick={() => onChange('horizon')}
-        >
-          <Package /> Horizon Mods
-        </button>
-      ) : null}
-      {BEDROCK_ENABLED ? (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={edition === 'bedrock'}
-          className={edition === 'bedrock' ? 'is-active' : undefined}
-          onClick={() => onChange('bedrock')}
-        >
-          <Gem /> Bedrock Edition
-        </button>
-      ) : null}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={edition === 'horizon'}
+        className={edition === 'horizon' ? 'is-active' : undefined}
+        onClick={() => onChange('horizon')}
+      >
+        <Package /> Horizon Mods
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={edition === 'bedrock'}
+        className={edition === 'bedrock' ? 'is-active' : undefined}
+        onClick={() => onChange('bedrock')}
+      >
+        <Gem /> Bedrock Edition
+      </button>
     </div>
   )
 }

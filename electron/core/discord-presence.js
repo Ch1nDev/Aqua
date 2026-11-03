@@ -10,6 +10,7 @@ export const DISCORD_RETRY_MAX_MS = 60_000
 export const DISCORD_CONNECT_TIMEOUT_MS = 5_000
 export const DISCORD_TEXT_LIMIT = 128
 export const DISCORD_JOIN_SECRET_LIMIT = 128
+export const AQUA_DISCORD_CLIENT_ID = '1566988925715615774'
 
 /**
  * Register an application at https://discord.com/developers/applications and

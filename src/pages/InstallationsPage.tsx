@@ -39,7 +39,6 @@ import {
   type InstallationViewMode,
 } from '../lib/installationMeta'
 import { useLauncher } from '../state/LauncherProvider'
-import { BEDROCK_ENABLED, HORIZON_ENABLED } from '../lib/features'
 import type { DownloadJob, HealthStatus, HorizonInstallJob, HorizonStatus, Installation } from '../lib/types'
 import { PackIcon } from '../components/brand/Brand'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -155,7 +154,7 @@ export function InstallationsPage() {
   const [launcherImportOpen, setLauncherImportOpen] = useState(false)
   const [exportTarget, setExportTarget] = useState<Installation | null>(null)
   const [healthSummaries, setHealthSummaries] = useState<Record<string, HealthStatus>>({})
-  const javaIsPlayTarget = !BEDROCK_ENABLED && !HORIZON_ENABLED ? true : !bedrockTarget && !horizonTarget
+  const javaIsPlayTarget = !bedrockTarget && !horizonTarget
   const customOrder = sortMode === 'custom'
 
   useEffect(() => {
@@ -187,7 +186,6 @@ export function InstallationsPage() {
   }
 
   const refreshHorizon = useCallback(async (force = false) => {
-    if (!HORIZON_ENABLED) return
     const request = ++horizonRequest.current
     setHorizonLoading(true)
     setHorizonError(null)
@@ -202,7 +200,6 @@ export function InstallationsPage() {
   }, [])
 
   useEffect(() => {
-    if (!HORIZON_ENABLED) return
     void refreshHorizon(false)
   }, [refreshHorizon])
 
@@ -312,19 +309,16 @@ export function InstallationsPage() {
   }, [allTags, tagFilter])
 
   const editionCards = useMemo(() => {
-    if (!BEDROCK_ENABLED) return []
     if (filter !== 'all' && filter !== 'bedrock') return []
     return (bedrock?.editions || []).filter((edition) => matches(edition.name, edition.version, edition.packageVersion))
   }, [bedrock, filter, normalizedQuery])
 
   const buildCards = useMemo(() => {
-    if (!BEDROCK_ENABLED) return []
     if (filter !== 'all' && filter !== 'bedrock') return []
     return extraBuilds.filter((entry) => matches(entry.version, entry.directory))
   }, [extraBuilds, filter, normalizedQuery])
 
   const horizonCards = useMemo(() => {
-    if (!HORIZON_ENABLED) return []
     if (filter !== 'all' && filter !== 'horizon') return []
     return (horizon?.builds || []).filter((build) => matches(build.tag, build.gameVersion))
   }, [horizon, filter, normalizedQuery])
@@ -501,8 +495,8 @@ export function InstallationsPage() {
             [
               ['all', 'All'],
               ['java', 'Java'],
-              ...(BEDROCK_ENABLED ? ([['bedrock', 'Bedrock']] as Array<[EditionFilter, string]>) : []),
-              ...(HORIZON_ENABLED ? ([['horizon', 'Horizon']] as Array<[EditionFilter, string]>) : []),
+              ['bedrock', 'Bedrock'],
+              ['horizon', 'Horizon'],
             ] as Array<[EditionFilter, string]>
           ).map(([value, label]) => (
             <button
@@ -598,7 +592,7 @@ export function InstallationsPage() {
         </div>
       </div>
 
-      {BEDROCK_ENABLED && bedrock?.supported && !bedrock?.editions.length && !bedrockLoading ? (
+      {bedrock?.supported && !bedrock?.editions.length && !bedrockLoading ? (
         <div className="callout bedrock-callout">
           <Store />
           <div>
@@ -621,7 +615,7 @@ export function InstallationsPage() {
         </div>
       ) : null}
 
-      {HORIZON_ENABLED && horizon && !horizon.supported ? (
+      {horizon && !horizon.supported ? (
         <div className="callout callout--warning">
           <AlertTriangle />
           <div>
@@ -631,7 +625,7 @@ export function InstallationsPage() {
         </div>
       ) : null}
 
-      {HORIZON_ENABLED && showHorizonJob && horizonJob ? (
+      {showHorizonJob && horizonJob ? (
         <section className="panel installation-job-panel">
           <div className="installation-job-panel__head">
             <div>
@@ -691,7 +685,7 @@ export function InstallationsPage() {
           <EmptyState
             icon={<Boxes />}
             title="Nothing installed yet"
-            description="Create a Minecraft: Java Edition installation. Each card keeps its own version and folder."
+            description="Create a Java installation, add a Bedrock build, or install Horizon. Each card keeps its own version and folder."
           >
             <Button variant="primary" icon={<Plus />} onClick={() => openInstallDialog({ mode: 'create' })}>
               New installation

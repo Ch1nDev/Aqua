@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, KeyRound, Sparkles } from 'lucide-react'
+import { Check, Sparkles } from 'lucide-react'
 import { getErrorMessage } from '../../lib/api'
 import { useLauncher } from '../../state/LauncherProvider'
 import { TitleArtwork } from '../brand/Artwork'
@@ -13,8 +13,9 @@ const FONT_SIZES: Array<{ value: number; label: string }> = [
 ]
 
 export function SetupWizard() {
-  const { setupOpen, data, settings, activeAccount, openAuth, saveSettings, completeSetup, dismissSetup } =
+  const { setupOpen, data, settings, activeAccount, signInOffline, saveSettings, completeSetup, dismissSetup } =
     useLauncher()
+  const [username, setUsername] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [finishing, setFinishing] = useState(false)
   const [uiScale, setUiScale] = useState(settings?.uiScale ?? 1)
@@ -22,9 +23,10 @@ export function SetupWizard() {
 
   useEffect(() => {
     if (!setupOpen) return
+    setUsername(activeAccount?.name || '')
     setError(null)
     setFinishing(false)
-  }, [setupOpen])
+  }, [setupOpen, activeAccount?.name])
 
   const applyPreference = async (patch: { uiScale?: number; reduceMotion?: boolean }) => {
     try {
@@ -35,9 +37,17 @@ export function SetupWizard() {
   }
 
   const handleFinish = async () => {
+    const name = username.trim()
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) {
+      setError('Use 3–16 letters, numbers, or underscores as your player name.')
+      return
+    }
     setFinishing(true)
     setError(null)
     try {
+      if (!activeAccount || activeAccount.name.toLowerCase() !== name.toLowerCase()) {
+        await signInOffline(name)
+      }
       await completeSetup()
     } catch (setupError) {
       setError(getErrorMessage(setupError))
@@ -61,7 +71,7 @@ export function SetupWizard() {
       open={setupOpen}
       onClose={() => void handleSkip()}
       title="Welcome to Aqua"
-      subtitle="Sign in with Microsoft to play Minecraft: Java Edition."
+      subtitle="One step: pick the name Minecraft will show."
       className="modal--setup"
       closeOnOverlay={false}
       footer={
@@ -71,11 +81,11 @@ export function SetupWizard() {
           </button>
           <Button
             variant="primary"
-            onClick={() => (activeAccount ? void handleFinish() : openAuth('microsoft'))}
+            onClick={() => void handleFinish()}
             loading={finishing}
-            icon={activeAccount ? <Check /> : <KeyRound />}
+            icon={<Check />}
           >
-            {activeAccount ? 'Finish setup' : 'Connect Microsoft'}
+            {activeAccount ? 'Finish setup' : 'Create profile'}
           </Button>
         </>
       }
@@ -90,31 +100,34 @@ export function SetupWizard() {
         <div className="setup__welcome">
           <div className="setup__welcome-copy">
             <TitleArtwork height="46px" />
-            <h2>{activeAccount ? `Signed in as ${activeAccount.name}` : 'Connect your Microsoft account'}</h2>
+            <h2>Choose your player name</h2>
             <p>
-              Aqua plays Minecraft: Java Edition with the Microsoft account that owns it. Sign-in uses Microsoft’s
-              official OAuth flow in your browser, and Aqua never sees your password.
+              This creates an offline profile stored on this device. Java, memory, and game folders use sensible
+              defaults — change any of them later in Settings.
             </p>
 
-            {activeAccount ? (
-              <div className="callout callout--info">
-                <Check />
-                <span>
-                  Your Minecraft profile is connected. The encrypted session is stored by your operating system and
-                  refreshed before each launch.
-                </span>
-              </div>
-            ) : (
-              <div className="setup__provider">
-                <Button variant="primary" icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
-                  Connect Microsoft
-                </Button>
-              </div>
-            )}
+            <label className="setup__name-field">
+              <span className="field__label">Player name</span>
+              <input
+                className="input"
+                value={username}
+                maxLength={16}
+                placeholder="Steve"
+                autoFocus
+                spellCheck={false}
+                onChange={(event) => {
+                  setUsername(event.target.value)
+                  setError(null)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void handleFinish()
+                }}
+              />
+            </label>
 
             <p className="setup__name-hint">
               <Sparkles />
-              This build supports Minecraft: Java Edition only. Bedrock and offline profiles are not available.
+              Offline profiles work in singleplayer and LAN worlds. Online servers need a Microsoft account.
             </p>
 
             <div className="setup__a11y">

@@ -260,8 +260,7 @@ export class AccountManager {
 
   accountsPayload() {
     return {
-      // Offline profiles are intentionally not exposed by the compliant line.
-      accounts: this.listPublic().filter((account) => account.type !== 'offline'),
+      accounts: this.listPublic(),
       activeAccountId: this.store.activeAccountId,
       secureStorageAvailable: this.persistenceAvailable,
       storageLabel: this.storageLabel,
@@ -282,7 +281,6 @@ export class AccountManager {
   }
 
   async signInOffline(rawName) {
-    throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
     if (typeof rawName !== 'string') throw new Error('Enter a username for the offline profile.')
     const name = rawName.trim()
     if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) {
@@ -744,7 +742,15 @@ export class AccountManager {
     const account = this.store.getAccount(accountId)
     if (!account) throw new Error('Add a player profile before launching Minecraft.')
     if (account.type === 'offline') {
-      throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
+      return {
+        accessToken: '0',
+        uuid: account.uuid,
+        name: account.name,
+        xuid: '0',
+        clientId: '0',
+        userType: 'legacy',
+        offline: true,
+      }
     }
     const token = await this.refreshTokenFor(accountId)
     if (!token?.accessToken) throw new Error('Your Microsoft session is not available. Sign in again.')
@@ -760,14 +766,13 @@ export class AccountManager {
 
   async switchAccount(accountId) {
     const account = await this.store.setActiveAccount(accountId)
-    if (account.type === 'offline') {
-      throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
-    }
-    try {
-      await this.refreshTokenFor(accountId)
-    } catch (error) {
-      this.logger.warn('Could not refresh the selected account', { message: error.message })
-      throw error
+    if (account.type !== 'offline') {
+      try {
+        await this.refreshTokenFor(accountId)
+      } catch (error) {
+        this.logger.warn('Could not refresh the selected account', { message: error.message })
+        throw error
+      }
     }
     this.broadcastAccounts()
     return this.store.publicAccount(account)
@@ -777,7 +782,8 @@ export class AccountManager {
     const account = this.store.getAccount(accountId)
     if (!account) throw new Error('Account not found.')
     if (account.type === 'offline') {
-      throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
+      this.broadcastAccounts()
+      return this.store.publicAccount(account)
     }
     await this.refreshTokenFor(accountId, { force: true })
     this.broadcastAccounts()

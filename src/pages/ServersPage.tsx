@@ -20,7 +20,6 @@ import { api, getErrorMessage } from '../lib/api'
 import { analyzeServerCompatibility } from '../lib/serverCompatibility'
 import { relativeTime } from '../lib/format'
 import { useLauncher } from '../state/LauncherProvider'
-import { BEDROCK_ENABLED } from '../lib/features'
 import type {
   LanDiscoverySnapshot,
   LanWorld,
@@ -90,7 +89,7 @@ export function ServersPage() {
     setLoading(true)
     try {
       const list = await api.servers.list()
-      setServers([...list].filter((server) => BEDROCK_ENABLED || server.edition !== 'bedrock'))
+      setServers([...list])
       setNotFound(false)
     } catch (error) {
       setNotFound(true)
@@ -170,7 +169,7 @@ export function ServersPage() {
     setForm({
       name: server.name,
       address: server.connectAddress || server.address,
-      edition: 'java',
+      edition: server.edition === 'bedrock' ? 'bedrock' : 'java',
       installationId: server.installationId ?? '',
     })
     setFormError(null)
@@ -250,7 +249,7 @@ export function ServersPage() {
   const lanBusy = Boolean(installation && launchingId === installation.id)
   const bedrockEdition = bedrock?.editions[0] ?? null
   const hasJavaServers = servers.some((server) => server.edition !== 'bedrock')
-  const hasBedrockServers = BEDROCK_ENABLED && servers.some((server) => server.edition === 'bedrock')
+  const hasBedrockServers = servers.some((server) => server.edition === 'bedrock')
   const profileFor = (server: ServerEntry) =>
     server.installationId ? installations.find((item) => item.id === server.installationId) || null : null
   const targetProfileFor = (server: ServerEntry) => profileFor(server) || installation
@@ -594,8 +593,9 @@ export function ServersPage() {
       <div className="callout callout--info servers-footnote">
         <Info />
         <span>
-          Java servers use the Microsoft account you signed in with. Online-mode servers verify that account; there
-          are no offline profiles in this build.
+          Java servers: offline profiles can only join servers with <span className="mono">online-mode=false</span>.
+          Online-mode servers require Microsoft sign-in, which is currently unavailable in Aqua. Bedrock servers always
+          sign in with the Xbox profile the Store edition is already using.
         </span>
       </div>
 
@@ -647,9 +647,9 @@ export function ServersPage() {
               <span className="field__hint">A saved server keeps its edition. Remove it and add it again to switch.</span>
             </div>
           ) : (
-            <Field label="Edition" hint="Java servers launch a launcher profile.">
+            <Field label="Edition" hint="Bedrock servers open Minecraft for Windows; Java servers launch a launcher profile.">
               <div className="segmented" role="radiogroup" aria-label="Server edition">
-                {(['java'] as const).map((edition) => (
+                {(['java', 'bedrock'] as const).map((edition) => (
                   <button
                     key={edition}
                     type="button"
@@ -660,7 +660,7 @@ export function ServersPage() {
                       setForm((current) => ({
                         ...current,
                         edition,
-                        installationId: current.installationId,
+                        installationId: edition === 'bedrock' ? '' : current.installationId,
                       }))
                     }
                   >
