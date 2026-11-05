@@ -5,7 +5,6 @@ import {
   Boxes,
   Check,
   CheckCircle2,
-  Circle,
   Copy,
   Cpu,
   Download,
@@ -40,7 +39,7 @@ import {
 } from '../lib/installationMeta'
 import { useLauncher } from '../state/LauncherProvider'
 import type { DownloadJob, HealthStatus, HorizonInstallJob, HorizonStatus, Installation } from '../lib/types'
-import { PackIcon } from '../components/brand/Brand'
+import { EditionMark, PackIcon, VersionMark, bedrockEditionKind } from '../components/brand/Brand'
 import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
 import { Badge, Button, EmptyState, IconButton, cx } from '../components/ui/primitives'
@@ -168,9 +167,10 @@ export function InstallationsPage() {
 
   const targetEdition = (editionId: string) => {
     selectBedrockTarget(editionId)
+    const edition = bedrock?.editions.find((entry) => entry.id === editionId)
     pushToast({
       level: 'info',
-      title: 'Bedrock is now the Play target',
+      title: `${edition?.editor ? 'Editor' : 'Bedrock'} is now the Play target`,
       message: 'Press Play on the dashboard, or Shift-click Play here to launch it now.',
     })
   }
@@ -315,7 +315,7 @@ export function InstallationsPage() {
 
   const buildCards = useMemo(() => {
     if (filter !== 'all' && filter !== 'bedrock') return []
-    return extraBuilds.filter((entry) => matches(entry.version, entry.directory))
+    return extraBuilds.filter((entry) => matches(entry.version, entry.directory, entry.editor ? 'editor' : null))
   }, [extraBuilds, filter, normalizedQuery])
 
   const horizonCards = useMemo(() => {
@@ -444,7 +444,6 @@ export function InstallationsPage() {
     <div className="page">
       <PageHeader
         title="Installations"
-        subtitle="Java profiles, Bedrock builds and Horizon builds in one list. Play sets the dashboard target; Shift-click Play to launch it now."
         actions={
           <>
             <Button
@@ -615,6 +614,27 @@ export function InstallationsPage() {
         </div>
       ) : null}
 
+      {bedrock?.supported && bedrock.stubs?.length && bedrock.editions.length ? (
+        <div className="callout bedrock-callout">
+          <Store />
+          <div>
+            <strong>Minecraft for Windows is only a Store placeholder</strong>
+            <span>
+              Windows lists the package, but its files are missing, so it and its Editor cannot start from it. Finish
+              the install in the Microsoft Store, or add a downloaded build with{' '}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => openInstallDialog({ mode: 'create', edition: 'bedrock' })}
+              >
+                New installation
+              </button>
+              .
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       {horizon && !horizon.supported ? (
         <div className="callout callout--warning">
           <AlertTriangle />
@@ -685,7 +705,7 @@ export function InstallationsPage() {
           <EmptyState
             icon={<Boxes />}
             title="Nothing installed yet"
-            description="Create a Java installation, add a Bedrock build, or install Horizon. Each card keeps its own version and folder."
+            description="Create a Java installation, add a Bedrock build, or install Horizon."
           >
             <Button variant="primary" icon={<Plus />} onClick={() => openInstallDialog({ mode: 'create' })}>
               New installation
@@ -779,22 +799,16 @@ export function InstallationsPage() {
               >
                 <div className="installation-card__top">
                   <div className="installation-card__identity">
-                    <button
-                      type="button"
-                      className={cx('installation-card__select', installation.isActive && 'is-on')}
-                      aria-label={installation.isActive ? 'Default Java installation' : 'Set as default Java installation'}
-                      aria-pressed={installation.isActive}
-                      title={installation.isActive ? 'Default Java installation' : 'Set as default Java installation'}
-                      onClick={() => void selectInstallation(installation.id)}
-                    >
-                      {installation.isActive ? <CheckCircle2 /> : <Circle />}
-                    </button>
                     <div className="installation-card__cube" data-version-type={installation.versionType}>
-                      <PackIcon
-                        modpack={installation.modpack}
-                        loader={installation.loader?.type ?? 'vanilla'}
-                        size={26}
-                      />
+                      {installation.versionType === 'snapshot' && !installation.modpack ? (
+                        <VersionMark type="snapshot" size={26} />
+                      ) : (
+                        <PackIcon
+                          modpack={installation.modpack}
+                          loader={installation.loader?.type ?? 'vanilla'}
+                          size={26}
+                        />
+                      )}
                     </div>
                     <div className="installation-card__titles">
                       <div className="installation-card__name-row">
@@ -1067,7 +1081,7 @@ export function InstallationsPage() {
               <div className="installation-card__top">
                 <div className="installation-card__identity">
                   <div className="installation-card__cube" data-edition="bedrock">
-                    <Gem />
+                    <EditionMark edition={bedrockEditionKind(edition.id)} size={26} fallback={<Gem />} />
                   </div>
                   <div className="installation-card__titles">
                     <div className="installation-card__name-row">
@@ -1080,17 +1094,22 @@ export function InstallationsPage() {
                     </div>
                     <div className="installation-card__version-row">
                       <span className="installation-card__version">
-                        {edition.version ? `Bedrock ${edition.version}` : 'Version unknown'} · package{' '}
-                        {edition.packageVersion}
+                        {edition.editor
+                          ? `Creator mode · ${edition.version ? `Minecraft ${edition.version}` : 'included with Minecraft'}`
+                          : `${edition.version ? `Bedrock ${edition.version}` : 'Version unknown'} · package ${edition.packageVersion}`}
                       </span>
-                      <Badge tone="default">Bedrock</Badge>
+                      <Badge tone="default">{edition.editor ? 'Editor' : 'Bedrock'}</Badge>
                     </div>
                   </div>
                 </div>
               </div>
 
               <div className="installation-card__statusline">
-                <span className="installation-card__played">Installed from the Microsoft Store</span>
+                <span className="installation-card__played">
+                  {edition.editor
+                    ? 'Included with Minecraft · Opens Creator mode'
+                    : 'Installed from the Microsoft Store'}
+                </span>
               </div>
 
               <dl className="installation-card__facts">
@@ -1147,11 +1166,17 @@ export function InstallationsPage() {
                 <div className="installation-card__top">
                   <div className="installation-card__identity">
                     <div className="installation-card__cube" data-edition="bedrock">
-                      <Gem />
+                      {entry.editor ? (
+                        <EditionMark edition="bedrock-editor" size={26} fallback={<Gem />} />
+                      ) : (
+                        <Gem />
+                      )}
                     </div>
                     <div className="installation-card__titles">
                       <div className="installation-card__name-row">
-                        <h2 className="installation-card__name">Bedrock {entry.version}</h2>
+                        <h2 className="installation-card__name">
+                          {entry.editor ? `Editor ${entry.version}` : `Bedrock ${entry.version}`}
+                        </h2>
                         {linked ? <Badge tone="success">Registered</Badge> : null}
                         {!linked && installed ? <Badge tone="success">Installed</Badge> : null}
                       </div>
@@ -1159,7 +1184,7 @@ export function InstallationsPage() {
                         <span className="installation-card__version">
                           {entry.layout === 'appx' ? 'APPX build · opens in place' : 'MSIXVC build · installs through Windows'}
                         </span>
-                        <Badge tone="default">Bedrock</Badge>
+                        <Badge tone="default">{entry.editor ? 'Editor' : 'Bedrock'}</Badge>
                       </div>
                     </div>
                   </div>
@@ -1168,10 +1193,16 @@ export function InstallationsPage() {
                 <div className="installation-card__statusline">
                   <span className="installation-card__played">
                     {linked
-                      ? 'This folder is the installed Minecraft'
+                      ? entry.editor
+                        ? 'This build is the installed Minecraft · Editor is ready'
+                        : 'This folder is the installed Minecraft'
                       : installed
-                        ? 'Installed through Windows'
-                        : 'Downloaded, not installed'}
+                        ? entry.editor
+                          ? 'Installed through Windows · Editor is ready'
+                          : 'Installed through Windows'
+                        : entry.editor
+                          ? 'Downloaded · register or install it to open Editor'
+                          : 'Downloaded, not installed'}
                   </span>
                 </div>
 
@@ -1263,7 +1294,7 @@ export function InstallationsPage() {
               <div className="installation-card__top">
                 <div className="installation-card__identity">
                   <div className="installation-card__cube" data-edition="horizon">
-                    <Cpu />
+                    <EditionMark edition="horizon" size={26} fallback={<Cpu />} />
                   </div>
                   <div className="installation-card__titles">
                     <div className="installation-card__name-row">

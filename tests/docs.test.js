@@ -40,7 +40,10 @@ test('the roadmap reader reports shipped and planned state', () => {
 
   assert.equal(byId['P1.1'].title, 'Crash Guard')
   assert.equal(byId['P1.7'].status, 'blocked')
-  assert.ok(features.some((feature) => feature.status === 'todo'))
+  assert.equal(byId['P1.4'].status, 'in-progress')
+  assert.equal(byId['P6.6'].status, 'done')
+  assert.ok(features.some((feature) => feature.status === 'blocked'))
+  assert.ok(features.some((feature) => feature.status === 'in-progress'))
 })
 
 test('the roadmap reader groups packages under their own phase', () => {

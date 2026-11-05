@@ -92,9 +92,7 @@ export function StatsPage() {
   return (
     <div className="page stats-page">
       <PageHeader
-        kicker="Local only · never uploaded"
         title="Playtime & activity"
-        subtitle="Built from the sessions Aqua already records. Everything stays on this computer and is never compared with anyone else."
         actions={
           <Button
             variant="primary"
@@ -193,7 +191,6 @@ export function StatsPage() {
               <div className="stats-panel__head">
                 <div>
                   <h2 className="stats-panel__title">Top installations</h2>
-                  <p className="stats-panel__subtitle">Where the recorded hours went.</p>
                 </div>
               </div>
               {stats.topInstallations.length ? (
@@ -236,7 +233,6 @@ export function StatsPage() {
               <div className="stats-panel__head">
                 <div>
                   <h2 className="stats-panel__title">Most-played versions</h2>
-                  <p className="stats-panel__subtitle">Playtime by each profile’s Minecraft version.</p>
                 </div>
               </div>
               {stats.versions.length ? (
@@ -263,7 +259,6 @@ export function StatsPage() {
             <div className="stats-panel__head">
               <div>
                 <h2 className="stats-panel__title">Recent crashes</h2>
-                <p className="stats-panel__subtitle">The last few classified crashes, kept with your diagnostics.</p>
               </div>
               <button type="button" className="link-button" onClick={() => navigate('logs', { category: 'crash' })}>
                 Open logs

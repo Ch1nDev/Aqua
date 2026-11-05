@@ -28,7 +28,8 @@ function kindIcon(kind: string) {
  */
 export function BedrockAddonsPanel() {
   const { bedrock, bedrockLoading, refreshBedrock, pushToast, navigate } = useLauncher()
-  const editions = bedrock?.editions ?? []
+  // Editor is the same install in another mode, so it is not a second set of files.
+  const editions = (bedrock?.editions ?? []).filter((edition) => !edition.editor)
   const [editionId, setEditionId] = useState<string | null>(null)
   const [data, setData] = useState<BedrockAddonsResult | null>(null)
   const [loading, setLoading] = useState(false)

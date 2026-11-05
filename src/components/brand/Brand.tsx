@@ -47,11 +47,11 @@ const LOADER_MARKS: Record<LoaderType, ReactNode> = {
  * `quilt.png` into `public/artwork` and they replace the drawn emblems below.
  */
 const LOADER_IMAGE_CANDIDATES: Record<LoaderType, string[]> = {
-  vanilla: ['artwork/vanilla.png', 'artwork/vanilla.webp', 'artwork/vanilla.svg'],
-  fabric: ['artwork/fabric.png', 'artwork/fabric.webp', 'artwork/fabric.svg'],
-  quilt: ['artwork/quilt.png', 'artwork/quilt.webp', 'artwork/quilt.svg'],
-  forge: ['artwork/forge.png', 'artwork/forge.webp', 'artwork/forge.svg'],
-  neoforge: ['artwork/neoforge.png', 'artwork/neoforge.webp', 'artwork/neoforge.svg'],
+  vanilla: ['artwork/icons/java.png', 'artwork/java.png', 'artwork/vanilla.png'],
+  fabric: ['artwork/icons/fabric.png', 'artwork/fabric.png'],
+  quilt: ['artwork/icons/quilt.png', 'artwork/quilt.png'],
+  forge: ['artwork/icons/forge.png', 'artwork/forge.png'],
+  neoforge: ['artwork/icons/neoforge.png', 'artwork/neoforge.png'],
 }
 
 export function LoaderMark({
@@ -78,6 +78,99 @@ export function LoaderMark({
           {LOADER_MARKS[type] || LOADER_MARKS.vanilla}
         </svg>
       )}
+    </span>
+  )
+}
+
+// The bundled copy in `icons/` is spelled two ways across the repo, so both
+// names and the top-level copy are accepted.
+const BEDROCK_ICONS = ['artwork/icons/bedrock.png', 'artwork/icons/bedorck.png', 'artwork/bedrock.png'] as const
+
+/** The block art bundled for each launcher edition. */
+const EDITION_ICONS = {
+  java: ['artwork/icons/java.png', 'artwork/java.png'],
+  bedrock: BEDROCK_ICONS,
+  // Minecraft Preview and Editor have their own artwork and fall back to Bedrock's.
+  'bedrock-preview': ['artwork/icons/preview.png', ...BEDROCK_ICONS],
+  'bedrock-editor': ['artwork/icons/editor.png', ...BEDROCK_ICONS],
+  'bedrock-preview-editor': ['artwork/icons/editor.png', ...BEDROCK_ICONS],
+  horizon: ['artwork/icons/rust.png'],
+} as const
+
+export type EditionKind = keyof typeof EDITION_ICONS
+
+/**
+ * The artwork kind for a detected Bedrock edition: Minecraft Preview has its own
+ * icon, and both Store editions otherwise share the Bedrock one.
+ */
+export function bedrockEditionKind(id: string | null | undefined): EditionKind {
+  const key = String(id ?? '')
+  if (key.includes('editor')) return key.includes('preview') ? 'bedrock-preview-editor' : 'bedrock-editor'
+  return key.includes('preview') ? 'bedrock-preview' : 'bedrock'
+}
+
+/** The artwork for a Java version, so snapshots are told apart from releases. */
+const VERSION_ICONS = {
+  release: ['artwork/icons/java.png', 'artwork/java.png'],
+  snapshot: ['artwork/icons/snapshot.png'],
+  old_beta: ['artwork/icons/java.png', 'artwork/java.png'],
+  old_alpha: ['artwork/icons/java.png', 'artwork/java.png'],
+} as const
+
+export type VersionKind = keyof typeof VERSION_ICONS
+
+/** The icon for a version type: snapshots use their own block art. */
+export function VersionMark({
+  type,
+  size = 16,
+  className,
+}: {
+  type: VersionKind
+  size?: number
+  className?: string
+}) {
+  const source = useArtworkSource([...VERSION_ICONS[type]])
+  if (!source) return null
+  return (
+    <span
+      className={['loader-mark', 'loader-mark--logo', 'version-mark', className].filter(Boolean).join(' ')}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <img src={source} alt="" draggable={false} />
+    </span>
+  )
+}
+
+/**
+ * The icon for a whole edition — Java, Bedrock or Horizon — used where the
+ * profile is not a Java installation with a loader. The `fallback` keeps the
+ * drawn icon visible until the artwork resolves.
+ */
+export function EditionMark({
+  edition,
+  size = 26,
+  className,
+  fallback = null,
+}: {
+  edition: EditionKind
+  size?: number
+  className?: string
+  fallback?: ReactNode
+}) {
+  const source = useArtworkSource([...EDITION_ICONS[edition]])
+
+  if (!source) return <>{fallback}</>
+
+  // Wrapped in the same `loader-mark` holder LoaderMark renders, so an edition
+  // icon and a mod-loader icon occupy an identical box everywhere.
+  return (
+    <span
+      className={['loader-mark', 'loader-mark--logo', 'edition-mark', className].filter(Boolean).join(' ')}
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <img src={source} alt="" draggable={false} />
     </span>
   )
 }

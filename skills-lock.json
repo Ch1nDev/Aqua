@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "desktop-app-design": {
+      "source": "phazurlabs/ux-ui-mastery",
+      "sourceType": "github",
+      "skillPath": "skills/desktop-app-design/SKILL.md",
+      "computedHash": "45ff9c8e74efd62a1ffe6c872c0918412112bc2a1d2a3045b63ae9c144a103d2",
+      "installMode": "copy"
+    }
+  }
+}

@@ -4,6 +4,8 @@ import type {
   ActivityEntry,
   AuthState,
   Bootstrap,
+  ConfigExportResult,
+  ConfigImportResult,
   DownloadJob,
   GameState,
   HorizonFolderKind,
@@ -30,8 +32,11 @@ import type {
   LoaderType,
   LoaderTypeOption,
   LoaderVersion,
+  LaunchQueueSnapshot,
   LogReadResult,
   LogsList,
+  LogTailEvent,
+  LogTailResult,
   MinecraftSettingsApplyAllResult,
   MinecraftSettingsStatus,
   MinecraftSettingsSyncResult,
@@ -70,6 +75,10 @@ import type {
   ServerEntry,
   ServerStatus,
   SessionEntry,
+  SkinCatalog,
+  SkinSummary,
+  ResetPreview,
+  ResetResult,
   Settings,
   PlaytimeStats,
   StatsExportResult,
@@ -152,6 +161,15 @@ export interface AquaApi {
   settings: {
     update: (patch: Partial<Settings>) => Promise<Settings>
   }
+  config: {
+    exportConfig: () => Promise<ConfigExportResult | null>
+    importConfig: () => Promise<ConfigImportResult | null>
+  }
+  reset: {
+    preview: () => Promise<ResetPreview>
+    apply: (token: string, confirmation: string) => Promise<ResetResult>
+    cancel: () => Promise<boolean>
+  }
   screenshots: {
     list: (installationId: string) => Promise<ScreenshotList>
     thumbnail: (installationId: string, filename: string, size?: number) => Promise<ScreenshotThumbnail>
@@ -179,6 +197,10 @@ export interface AquaApi {
       installationId: string,
       kind: import('./types').HealthFixKind,
     ) => Promise<{ kind: string; path?: string; route?: string }>
+  }
+  maintenance: {
+    verifyAll: () => Promise<DownloadJob>
+    cancel: () => Promise<DownloadJob | null>
   }
   content: {
     index: (installationId: string, contentType: import('./types').ContentType) => Promise<import('./types').ContentIndexResult>
@@ -208,6 +230,17 @@ export interface AquaApi {
     switch: (id: string) => Promise<unknown>
     signOut: (id: string) => Promise<AccountsState>
     refresh: (id: string) => Promise<unknown>
+  }
+  skins: {
+    list: (options?: {
+      page?: number
+      limit?: number
+      search?: string
+      sort?: 'recent' | 'popular' | 'trending'
+      model?: 'classic' | 'slim' | null
+    }) => Promise<SkinCatalog>
+    apply: (accountId: string, skin: SkinSummary) => Promise<AccountsState | null>
+    clear: (accountId: string) => Promise<AccountsState | null>
   }
   java: {
     detect: (options?: { force?: boolean }) => Promise<JavaInfo[]>
@@ -303,6 +336,7 @@ export interface AquaApi {
     cancel: () => Promise<{ cancelled: boolean }>
   }
   game: {
+    preflight: (installationId: string) => Promise<import('./types').PreflightResult>
     launch: (
       installationId: string,
       serverAddress?: string | null,
@@ -317,6 +351,10 @@ export interface AquaApi {
     }>
     getState: () => Promise<GameState>
     recoverSafeMode: () => Promise<{ sessions: unknown[]; restored: number; conflicts: number; pending: boolean }>
+    queue: (installationId: string, safeMode?: boolean, reason?: string) => Promise<LaunchQueueSnapshot>
+    dequeue: (id: string) => Promise<LaunchQueueSnapshot>
+    listQueue: () => Promise<LaunchQueueSnapshot>
+    resumeQueue: () => Promise<LaunchQueueSnapshot>
   }
   crash: {
     last: () => Promise<CrashRecord | null>
@@ -377,7 +415,10 @@ export interface AquaApi {
     deleteBackup: (editionId: string, backupId: string) => Promise<{ id: string; editionId: string }>
     versions: (options?: { force?: boolean }) => Promise<BedrockCatalog>
     versionsState: () => Promise<BedrockVersionsState>
-    downloadVersion: (version: string) => Promise<{ version: string; package: string; directory: string; sizeBytes: number }>
+    downloadVersion: (
+      version: string,
+      editor?: boolean,
+    ) => Promise<{ version: string; package: string; directory: string; sizeBytes: number; editor?: boolean }>
     cancelVersion: (version: string) => Promise<{ version: string; cancelled: boolean }>
     removeVersion: (version: string) => Promise<{ version: string }>
     openVersionFolder: (version: string) => Promise<string>
@@ -399,6 +440,11 @@ export interface AquaApi {
       file: string
       installationId?: string
     }) => Promise<LogReadResult>
+    tail: (
+      request:
+        | { action: 'start'; category: 'launcher' | 'game' | 'crash'; file: string; installationId?: string }
+        | { action: 'stop'; id?: string },
+    ) => Promise<LogTailResult>
     openFolder: (request?: { category?: string; installationId?: string }) => Promise<string>
     openFile: (request: {
       category: 'launcher' | 'game' | 'crash'
@@ -459,6 +505,8 @@ export type EventPayloadMap = {
   activity: { activity: ActivityEntry[]; sessions: SessionEntry[] }
   downloads: { jobs: DownloadJob[] }
   game: GameState
+  'launch-queue': LaunchQueueSnapshot
+  'logs:tail': LogTailEvent
   auth: AuthState
   notification: { level: 'success' | 'error' | 'info' | 'warning'; title: string; message?: string }
   notifications: AppNotification[]

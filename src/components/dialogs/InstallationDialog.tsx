@@ -11,6 +11,7 @@ import {
   RotateCw,
   Search,
   Server,
+  Wrench,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../../lib/api'
 import { formatBytes, formatDate, versionTypeLabel } from '../../lib/format'
@@ -26,6 +27,7 @@ import type {
 } from '../../lib/types'
 import { LOADER_OPTIONS } from '../../lib/loaders'
 import { Badge, Button, Checkbox, Field, Spinner, Switch, cx } from '../ui/primitives'
+import { EditionMark, VersionMark } from '../brand/Brand'
 import { Modal } from '../ui/overlays'
 
 type VersionFilter = 'release' | 'snapshot' | 'all'
@@ -34,6 +36,7 @@ type BedrockChannel = 'release' | 'beta' | 'all'
 const EDITIONS: Array<{ id: InstallEdition; label: string; hint: string; icon: typeof Boxes }> = [
   { id: 'java', label: 'Java Edition', hint: 'Mojang releases and snapshots', icon: Boxes },
   { id: 'bedrock', label: 'Bedrock Edition', hint: 'Builds from Microsoft', icon: Gem },
+  { id: 'editor', label: 'Editor', hint: 'Minecraft’s creator mode, included with Bedrock', icon: Wrench },
   { id: 'horizon', label: 'Horizon', hint: 'The Rust client, prepared by Aqua', icon: Cpu },
 ]
 
@@ -175,7 +178,7 @@ export function InstallationDialog() {
   // Bedrock builds come from the launcher's own catalog, so it is fetched the
   // first time the Bedrock type is chosen.
   useEffect(() => {
-    if (!isOpen || edition !== 'bedrock' || bedrockVersions) return
+    if (!isOpen || (edition !== 'bedrock' && edition !== 'editor') || bedrockVersions) return
     void refreshBedrockVersions(false)
   }, [isOpen, edition, bedrockVersions, refreshBedrockVersions])
 
@@ -204,7 +207,7 @@ export function InstallationDialog() {
   // Each type picks a sensible first version so the picker is never blank.
   useEffect(() => {
     if (!isOpen || versionId) return
-    if (edition === 'bedrock' && bedrockVersions?.versions.length) {
+    if ((edition === 'bedrock' || edition === 'editor') && bedrockVersions?.versions.length) {
       const first = bedrockVersions.versions.find((entry) => entry.channel === 'release') || bedrockVersions.versions[0]
       setVersionId(first.version)
     }
@@ -265,9 +268,13 @@ export function InstallationDialog() {
         ? versionId
           ? `Bedrock ${versionId}`
           : 'Bedrock build'
-        : versionId
-          ? `Horizon ${versionId}`
-          : 'Horizon build'
+        : edition === 'editor'
+          ? versionId
+            ? `Editor ${versionId}`
+            : 'Editor build'
+          : versionId
+            ? `Horizon ${versionId}`
+            : 'Horizon build'
 
   const changeEdition = (next: InstallEdition) => {
     if (next === edition) return
@@ -304,7 +311,7 @@ export function InstallationDialog() {
   }
 
   const validate = (): string | null => {
-    if (edition === 'bedrock') {
+    if (edition === 'bedrock' || edition === 'editor') {
       if (!versionId) return 'Choose a Bedrock version.'
       if (!selectedBedrock) return 'Choose a build from the list.'
       return null
@@ -342,9 +349,18 @@ export function InstallationDialog() {
     setSaving(true)
     setError(null)
     try {
-      if (edition === 'bedrock') {
+      if (edition === 'bedrock' || edition === 'editor') {
+        const editor = edition === 'editor'
         closeInstallDialog()
-        void downloadBedrockVersion(versionId)
+        void downloadBedrockVersion(versionId, { editor })
+        if (editor) {
+          pushToast({
+            level: 'info',
+            title: `Editor build ${versionId} is downloading`,
+            message:
+              'It appears on Installations as an Editor version. Register or install it, then Play opens Creator mode.',
+          })
+        }
         return
       }
       if (edition === 'horizon') {
@@ -399,12 +415,20 @@ export function InstallationDialog() {
 
   const submitLabel = isEdit
     ? 'Save changes'
-    : edition === 'bedrock'
+    : edition === 'bedrock' || edition === 'editor'
       ? 'Download build'
       : edition === 'horizon'
         ? 'Install build'
         : 'Create installation'
-  const submitIcon = isEdit ? <Check /> : edition === 'bedrock' ? <Download /> : edition === 'horizon' ? <Cpu /> : <Boxes />
+  const submitIcon = isEdit ? (
+    <Check />
+  ) : edition === 'bedrock' || edition === 'editor' ? (
+    <Download />
+  ) : edition === 'horizon' ? (
+    <Cpu />
+  ) : (
+    <Boxes />
+  )
 
   return (
     <Modal
@@ -425,7 +449,9 @@ export function InstallationDialog() {
             </Checkbox>
           ) : (
             <span className="text-dim">
-              {edition === 'bedrock' ? 'The build lands in the launcher’s own folder.' : 'Aqua installs and prepares this build.'}
+              {edition === 'bedrock' || edition === 'editor'
+                ? 'The build lands in the launcher’s own folder.'
+                : 'Aqua installs and prepares this build.'}
             </span>
           )}
           <Button variant="ghost" onClick={closeInstallDialog} disabled={saving}>
@@ -448,7 +474,7 @@ export function InstallationDialog() {
           <Field
             label="Installation name"
             htmlFor="installation-name"
-            hint={edition === 'java' ? undefined : 'Aqua names Bedrock and Horizon builds from their version.'}
+            hint={edition === 'java' ? undefined : 'Aqua names Bedrock, Editor and Horizon builds from their version.'}
           >
             <input
               id="installation-name"
@@ -511,7 +537,13 @@ export function InstallationDialog() {
                     className={cx('loader-choice', edition === option.id && 'is-selected')}
                     onClick={() => changeEdition(option.id)}
                   >
-                    <Icon />
+                    <span className="loader-choice__icon">
+                      <EditionMark
+                        edition={option.id === 'editor' ? 'bedrock-editor' : option.id}
+                        size={14}
+                        fallback={<Icon size={13} />}
+                      />
+                    </span>
                     {option.label}
                   </button>
                 )
@@ -524,21 +556,29 @@ export function InstallationDialog() {
           <div className="install-dialog__section-title">
             <div>
               <h3>
-                {edition === 'bedrock' ? 'Bedrock version' : edition === 'horizon' ? 'Horizon release' : 'Minecraft version'}
+                {edition === 'editor'
+                  ? 'Editor build'
+                  : edition === 'bedrock'
+                    ? 'Bedrock version'
+                    : edition === 'horizon'
+                      ? 'Horizon release'
+                      : 'Minecraft version'}
               </h3>
               <p>
-                {edition === 'bedrock'
-                  ? 'Microsoft’s published builds. Older APPX builds register in place; MSIXVC builds install through Windows.'
-                  : edition === 'horizon'
-                    ? 'Horizon’s own releases. Aqua downloads, prepares, and launches the Rust client.'
-                    : 'Choose the exact release or snapshot for this profile.'}
+                {edition === 'editor'
+                  ? 'Editor ships inside Minecraft. Pick the build to download, then register or install it and Editor opens from its card.'
+                  : edition === 'bedrock'
+                    ? 'Microsoft’s published builds. Older APPX builds register in place; MSIXVC builds install through Windows.'
+                    : edition === 'horizon'
+                      ? 'Horizon’s own releases. Aqua downloads, prepares, and launches the Rust client.'
+                      : 'Choose the exact release or snapshot for this profile.'}
               </p>
             </div>
             <button
               type="button"
               className="icon-btn"
               onClick={() =>
-                edition === 'bedrock'
+                edition === 'bedrock' || edition === 'editor'
                   ? void refreshBedrockVersions(true)
                   : edition === 'horizon'
                     ? void loadHorizonReleases(true)
@@ -549,7 +589,7 @@ export function InstallationDialog() {
             >
               <RotateCw
                 className={
-                  (edition === 'bedrock' && bedrockVersionsLoading) ||
+                  ((edition === 'bedrock' || edition === 'editor') && bedrockVersionsLoading) ||
                   (edition === 'horizon' && horizonLoading) ||
                   (edition === 'java' && versionsLoading)
                     ? 'spin'
@@ -626,6 +666,7 @@ export function InstallationDialog() {
                           <span className={cx('version-option__indicator', version.id === versionId && 'is-on')}>
                             {version.id === versionId ? <Check /> : null}
                           </span>
+                          <VersionMark type={version.type} size={14} />
                           <span className="version-option__id">{version.id}</span>
                           <Badge
                             tone={
@@ -662,7 +703,7 @@ export function InstallationDialog() {
                 </div>
               ) : null}
             </div>
-          ) : edition === 'bedrock' ? (
+          ) : edition === 'bedrock' || edition === 'editor' ? (
             <div className="version-picker">
               <div className="version-picker__toolbar">
                 <div className="search-input">

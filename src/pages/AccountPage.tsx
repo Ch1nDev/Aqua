@@ -19,6 +19,8 @@ import { formatDateTime, relativeTime } from '../lib/format'
 import { useLauncher } from '../state/LauncherProvider'
 import type { Account } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
+import { SkinAvatar } from '../components/account/SkinAvatar'
+import { SkinPicker } from '../components/account/SkinPicker'
 import {
   Avatar,
   Badge,
@@ -34,12 +36,10 @@ export function AccountPage() {
   const {
     accounts,
     activeAccount,
-    settings,
     openAuth,
     switchAccount,
     refreshAccount,
     signOut,
-    navigate,
   } = useLauncher()
   const [busyId, setBusyId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -49,7 +49,6 @@ export function AccountPage() {
 
   const allAccounts = accounts?.accounts || []
   const otherAccounts = allAccounts.filter((account) => account.id !== activeAccount?.id)
-  const configured = Boolean(settings?.microsoftClientId)
 
   const handleSwitch = async (account: Account) => {
     setBusyId(account.id)
@@ -90,19 +89,7 @@ export function AccountPage() {
 
   return (
     <div className="page">
-      <PageHeader
-        title="Account"
-        subtitle={
-          MICROSOFT_AUTH_ENABLED
-            ? 'Sign in with an approved Microsoft app for online play, or use an offline profile stored on this device.'
-            : 'Offline profiles are stored on this device. Each one gets a generated player UUID.'
-        }
-        actions={
-          <Button variant="primary" icon={<UserPlus />} onClick={() => openAuth()}>
-            {MICROSOFT_AUTH_ENABLED ? 'Add account' : 'Add profile'}
-          </Button>
-        }
-      />
+      <PageHeader title="Account" subtitle="Your player profiles, sessions and skin." />
 
       {!activeAccount ? (
         <div className="panel account-empty-panel">
@@ -113,33 +100,23 @@ export function AccountPage() {
               </div>
             </div>
             <div className="account-empty__copy">
-              <h2>Add a player profile</h2>
+              <h2>Sign in to Minecraft</h2>
               <p>
                 {MICROSOFT_AUTH_ENABLED
-                  ? 'Offline profiles start instantly and work in singleplayer and LAN. Microsoft accounts use the official OAuth flow when your Azure app is approved for Minecraft services, and their sessions are encrypted with your operating system. You can keep several profiles and switch between them.'
+                  ? 'Microsoft accounts use the official OAuth flow and keep their session encrypted with your operating system. Offline profiles start instantly and work in singleplayer and LAN, with a username and generated UUID that stay on this device. You can keep several profiles and switch between them.'
                   : 'Offline profiles start instantly and work in singleplayer and LAN. Each profile keeps its own username and generated UUID on this device, and you can switch between them at any time.'}
               </p>
               <div className="account-empty__actions">
-                <Button variant="primary" size="lg" icon={<WifiOff />} onClick={() => openAuth('offline')}>
+                <Button variant="primary" size="lg" icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
+                  Sign in with Microsoft
+                </Button>
+                <Button icon={<WifiOff />} onClick={() => openAuth('offline')}>
                   Create offline profile
                 </Button>
-                {MICROSOFT_AUTH_ENABLED ? (
-                  <Button icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
-                    Connect Microsoft
-                  </Button>
-                ) : null}
               </div>
-              {MICROSOFT_AUTH_ENABLED && !configured ? (
-                <div className="callout callout--warning" style={{ marginTop: 20 }}>
-                  <TriangleAlert />
-                  <div>
-                    Microsoft sign-in needs an Azure client ID and Mojang approval. Offline profiles work without it.{' '}
-                    <button type="button" className="link-button" onClick={() => openAuth('microsoft')}>
-                      Microsoft setup <ChevronRight />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+              <p style={{ marginTop: 14, fontSize: 12, opacity: 0.65 }}>
+                Hold Shift in the sign-in dialog to make an offline account instead.
+              </p>
               {accounts && !accounts.secureStorageAvailable ? (
                 <div className="callout callout--warning" style={{ marginTop: 12 }}>
                   <ShieldX />
@@ -159,7 +136,11 @@ export function AccountPage() {
             <div className="account-profile__content">
               <div className="account-profile__identity">
                 <div className={cx('account-profile__avatar', activeAccount.sessionExpired && 'is-expired')}>
-                  <Avatar name={activeAccount.name} src={activeAccount.avatarDataUrl} size="xl" />
+                  {activeAccount.skin?.textureDataUrl ? (
+                    <SkinAvatar name={activeAccount.name} texture={activeAccount.skin.textureDataUrl} size="xl" />
+                  ) : (
+                    <Avatar name={activeAccount.name} src={activeAccount.avatarDataUrl} size="xl" />
+                  )}
                   <span className="account-profile__badge">
                     <CheckCircle2 />
                   </span>
@@ -303,79 +284,32 @@ export function AccountPage() {
               )}
             </section>
 
-            {MICROSOFT_AUTH_ENABLED ? (
-            <section className="panel panel--pad">
-              <div className="account-side__head">
-                <KeyRound />
-                <div>
-                  <h3>Microsoft app ID</h3>
-                  <p>The Azure application used for this launcher’s sign-in.</p>
-                </div>
-              </div>
-              {configured && settings ? (
-                <>
-                  <div className="copy-field account-app-id">
-                    <span className="copy-field__value">{settings.microsoftClientId}</span>
-                    <CopyButton value={settings.microsoftClientId} label="Copy client ID" />
-                  </div>
-                  <div className="account-side__actions">
-                    <button type="button" className="link-button" onClick={() => navigate('settings')}>
-                      Manage in settings <ChevronRight />
-                    </button>
-                    <button type="button" className="link-button" onClick={() => navigate('settings')}>
-                      Change <ChevronRight />
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="callout callout--warning">
-                  <TriangleAlert />
-                  <div>
-                    No app ID configured. Adding one is required for new sign-ins.
-                    <div style={{ marginTop: 8 }}>
-                      <Button size="sm" variant="primary" onClick={() => openAuth('microsoft')}>
-                        Configure sign-in
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </section>
-            ) : null}
           </aside>
+
+          <SkinPicker account={activeAccount} />
 
           <section className="panel account-others">
             <div className="panel-head">
               <div>
                 <h2 className="panel-head__title">{MICROSOFT_AUTH_ENABLED ? 'Other accounts' : 'Other profiles'}</h2>
-                <p className="panel-head__subtitle">
-                  {MICROSOFT_AUTH_ENABLED ? 'Switch without typing your password again.' : 'Switch players without restarting the launcher.'}
-                </p>
               </div>
-              <Button variant="ghost" size="sm" icon={<UserPlus />} onClick={() => openAuth()}>
-                {MICROSOFT_AUTH_ENABLED ? 'Add account' : 'Add profile'}
-              </Button>
             </div>
             <div className="panel-body">
               {otherAccounts.length === 0 ? (
                 <EmptyState
                   icon={<Users />}
                   title="Only one profile connected"
-                  description={
-                    MICROSOFT_AUTH_ENABLED
-                      ? 'Add another Microsoft account to switch between Minecraft profiles.'
-                      : 'Add another offline profile to switch between Minecraft players.'
-                  }
-                >
-                  <Button size="sm" icon={<UserPlus />} onClick={() => openAuth()}>
-                    {MICROSOFT_AUTH_ENABLED ? 'Add account' : 'Add profile'}
-                  </Button>
-                </EmptyState>
+                  description="Switch between player profiles here once this device has more than one."
+                />
               ) : (
                 <ul className="account-list">
                   {otherAccounts.map((account) => (
                     <li key={account.id} className="account-list__item">
-                      <Avatar name={account.name} src={account.avatarDataUrl} />
+                      {account.skin?.textureDataUrl ? (
+                        <SkinAvatar name={account.name} texture={account.skin.textureDataUrl} />
+                      ) : (
+                        <Avatar name={account.name} src={account.avatarDataUrl} />
+                      )}
                       <div className="account-list__copy">
                         <span className="account-list__name">{account.name}</span>
                         <span className="account-list__uuid mono">{account.uuid}</span>

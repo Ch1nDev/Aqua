@@ -5,6 +5,7 @@ import './styles/base.css'
 import './styles/components.css'
 import './styles/app.css'
 import './styles/theme.css'
+import './styles/ui.css'
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element not found')

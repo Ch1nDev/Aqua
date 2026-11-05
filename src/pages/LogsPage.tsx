@@ -8,15 +8,18 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  Pause,
+  Play,
   RefreshCw,
   ScrollText,
   Search,
   Terminal,
+  X,
 } from 'lucide-react'
-import { api, getErrorMessage } from '../lib/api'
+import { api, getErrorMessage, type EventPayloadMap } from '../lib/api'
 import { formatBytes, formatDateTime, relativeTime } from '../lib/format'
 import { useLauncher } from '../state/LauncherProvider'
-import type { CrashRecord, LogFile, LogReadResult, LogsList } from '../lib/types'
+import type { CrashRecord, LogFile, LogLevel, LogReadResult, LogTailLine, LogTailStart, LogsList } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Button,
@@ -30,6 +33,8 @@ import {
 
 type LogCategory = 'launcher' | 'game' | 'crash'
 type LogSelection = { category: LogCategory; file: string; installationId?: string }
+
+const MAX_TAIL_VIEW_LINES = 2000
 
 const TABS: Array<{ category: LogCategory; label: string; icon: typeof FileText }> = [
   { category: 'launcher', label: 'Launcher', icon: Terminal },
@@ -76,7 +81,10 @@ export function LogsPage() {
   const [content, setContent] = useState<LogReadResult | null>(null)
   const [contentLoading, setContentLoading] = useState(false)
   const [contentError, setContentError] = useState<string | null>(null)
-  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [following, setFollowing] = useState(false)
+  const [tail, setTail] = useState<LogTailStart | null>(null)
+  const [levelFilter, setLevelFilter] = useState<'all' | LogLevel>('all')
+  const [modFilter, setModFilter] = useState<string | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [search, setSearch] = useState('')
   const [exporting, setExporting] = useState(false)
@@ -85,6 +93,8 @@ export function LogsPage() {
   const initializedRoute = useRef(false)
   const contentRef = useRef<HTMLPreElement>(null)
   const readRequest = useRef(0)
+  const tailRef = useRef<LogTailStart | null>(null)
+  const tailRequest = useRef(0)
 
   const loadContent = useCallback(
     async (nextSelection: LogSelection | null) => {
@@ -173,14 +183,92 @@ export function LogsPage() {
     void loadList({ fromRoute: true })
   }, [loadList])
 
+  const stopFollow = useCallback(async (clear = false) => {
+    tailRequest.current += 1
+    const current = tailRef.current
+    tailRef.current = null
+    setFollowing(false)
+    if (clear) setTail(null)
+    if (!current) return
+    try {
+      await api.logs.tail({ action: 'stop', id: current.id })
+    } catch {
+      // The main process may already have stopped the watch on game exit.
+    }
+  }, [])
+
+  const startFollow = useCallback(async () => {
+    if (!selection || selection.category === 'crash') return
+    const requestId = ++tailRequest.current
+    setFollowing(true)
+    try {
+      const result = await api.logs.tail({
+        action: 'start',
+        category: selection.category,
+        file: selection.file,
+        installationId: selection.installationId,
+      })
+      if (tailRequest.current !== requestId) {
+        if (!result.stopped) void api.logs.tail({ action: 'stop', id: result.id })
+        return
+      }
+      if (result.stopped) {
+        setFollowing(false)
+        return
+      }
+      tailRef.current = result
+      setTail(result)
+      setFollowing(true)
+      setLevelFilter('all')
+      setModFilter(null)
+    } catch (error) {
+      setFollowing(false)
+      pushToast({ level: 'error', title: 'Could not follow log', message: getErrorMessage(error) })
+    }
+  }, [pushToast, selection])
+
+  const toggleFollow = useCallback(() => {
+    if (following) void stopFollow(false)
+    else void startFollow()
+  }, [following, startFollow, stopFollow])
+
   useEffect(() => {
-    if (!autoRefresh) return
-    const timer = window.setInterval(() => {
-      void loadList({ autoSelect: false })
-      if (selection) void loadContent(selection)
-    }, 3000)
-    return () => window.clearInterval(timer)
-  }, [autoRefresh, loadList, loadContent, selection])
+    tailRef.current = tail
+  }, [tail])
+
+  useEffect(() => {
+    const unsubscribe = api.events.subscribe((event) => {
+      if (event.type !== 'logs:tail') return
+      const payload = event.payload as EventPayloadMap['logs:tail']
+      if (!tailRef.current || payload.id !== tailRef.current.id) return
+      if (payload.stopped) {
+        tailRef.current = null
+        setFollowing(false)
+        if (payload.error) {
+          pushToast({ level: 'warning', title: 'Log tail stopped', message: payload.error })
+        }
+        return
+      }
+      setTail((current) => {
+        if (!current || current.id !== payload.id) return current
+        const lines = payload.reset ? payload.lines : [...current.lines, ...payload.lines]
+        return {
+          ...current,
+          lines: lines.slice(-MAX_TAIL_VIEW_LINES),
+          size: payload.size,
+          modified: payload.modified,
+        }
+      })
+    })
+    return unsubscribe
+  }, [pushToast])
+
+  useEffect(() => {
+    return () => {
+      const current = tailRef.current
+      if (current) void api.logs.tail({ action: 'stop', id: current.id })
+    }
+  }, [])
 
   useEffect(() => {
     void api.crash
@@ -194,11 +282,14 @@ export function LogsPage() {
     const element = contentRef.current
     if (!element) return
     element.scrollTop = element.scrollHeight
-  }, [content, autoScroll, search])
+  }, [tail, content, autoScroll, search, levelFilter, modFilter])
 
   const selectCategory = (nextCategory: LogCategory) => {
+    void stopFollow(true)
     setCategory(nextCategory)
     setSearch('')
+    setLevelFilter('all')
+    setModFilter(null)
     const nextSelection = list ? selectionForCategory(list, nextCategory) : null
     setSelection(nextSelection)
     setContent(null)
@@ -206,8 +297,11 @@ export function LogsPage() {
   }
 
   const selectFile = (nextSelection: LogSelection) => {
+    void stopFollow(true)
     setSelection(nextSelection)
     setSearch('')
+    setLevelFilter('all')
+    setModFilter(null)
     setContent(null)
     void loadContent(nextSelection)
   }
@@ -259,18 +353,56 @@ export function LogsPage() {
     }
   }
 
+  const sourceLines = useMemo<LogTailLine[]>(() => {
+    if (tail) return tail.lines
+    if (!content) return []
+    return content.content.split(/\r?\n/).map((text) => ({
+      text,
+      level: lineLevelForText(text),
+      mod: null,
+    }))
+  }, [content, tail])
+
   const displayed = useMemo(() => {
-    if (!content) return { lines: [] as string[], matchCount: 0, truncated: false }
-    const allLines = content.content.split(/\r?\n/)
-    const query = search.trim()
-    if (query) {
-      const matches = allLines.filter((line) => line.toLowerCase().includes(query.toLowerCase()))
-      return { lines: matches.slice(0, 1500), matchCount: matches.length, truncated: matches.length > 1500 }
-    }
+    const query = search.trim().toLowerCase()
+    const filtered = sourceLines.filter((line) => {
+      if (query && !line.text.toLowerCase().includes(query)) return false
+      if (levelFilter !== 'all' && line.level !== levelFilter) return false
+      if (modFilter && line.mod?.id !== modFilter) return false
+      return true
+    })
     const maxLines = 5000
-    const slice = allLines.slice(-maxLines)
-    return { lines: slice, matchCount: allLines.length, truncated: allLines.length > maxLines || content.truncated }
-  }, [content, search])
+    return {
+      lines: filtered.slice(-maxLines),
+      matchCount: filtered.length,
+      truncated:
+        filtered.length > maxLines ||
+        Boolean(tail?.truncated) ||
+        Boolean(content?.truncated),
+    }
+  }, [content?.truncated, levelFilter, modFilter, search, sourceLines, tail?.truncated])
+
+  const modFilterName = useMemo(() => {
+    if (!modFilter) return null
+    for (const line of sourceLines) {
+      if (line.mod?.id === modFilter) return line.mod.name
+    }
+    return modFilter
+  }, [modFilter, sourceLines])
+
+  const firstIssueIndex = displayed.lines.findIndex(
+    (line) => line.level === 'error' || line.level === 'warn',
+  )
+  const copyValue = tail ? tail.lines.map((line) => line.text).join('\n') : content?.content || ''
+  const activeSize = tail?.size ?? content?.size
+  const activeModified = tail?.modified ?? content?.modified
+
+  const jumpToIssue = () => {
+    if (firstIssueIndex < 0) return
+    setAutoScroll(false)
+    const node = contentRef.current?.querySelector<HTMLElement>(`[data-line-index="${firstIssueIndex}"]`)
+    node?.scrollIntoView({ block: 'center' })
+  }
 
   const categoriesCount: Record<LogCategory, number> = {
     launcher: list?.launcher.length || 0,
@@ -284,7 +416,6 @@ export function LogsPage() {
     <div className="page page--logs">
       <PageHeader
         title="Logs & diagnostics"
-        subtitle="Launcher output, game sessions, and crash reports in one place."
         actions={
           <>
             <Button icon={<FolderOpen />} onClick={() => void openFolder()}>
@@ -350,10 +481,15 @@ export function LogsPage() {
           })}
         </div>
         <div className="logs-toolbar__right">
-          <label className="logs-live-toggle">
-            <Switch checked={autoRefresh} onChange={setAutoRefresh} label="Auto refresh logs" />
-            <span>Live</span>
-          </label>
+          <Button
+            size="sm"
+            variant={following ? 'primary' : 'ghost'}
+            icon={following ? <Pause /> : <Play />}
+            onClick={toggleFollow}
+            disabled={!selection || selection.category === 'crash'}
+          >
+            {following ? 'Pause' : 'Follow'}
+          </Button>
           <IconButton label="Refresh logs" onClick={refresh}>
             <RefreshCw className={listLoading || contentLoading ? 'spin' : undefined} />
           </IconButton>
@@ -469,9 +605,9 @@ export function LogsPage() {
               <FileText />
               <div>
                 <span className="mono">{currentName || 'No log selected'}</span>
-                {content ? (
+                {activeSize != null ? (
                   <span>
-                    {formatBytes(content.size)} · updated {relativeTime(content.modified)}
+                    {formatBytes(activeSize)} · updated {activeModified ? relativeTime(activeModified) : 'unknown'}
                   </span>
                 ) : (
                   <span>Select a log file to inspect it.</span>
@@ -487,12 +623,12 @@ export function LogsPage() {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   aria-label="Find in log"
-                  disabled={!content}
+                  disabled={!content && !tail}
                 />
               </div>
-              {content ? (
+              {content || tail ? (
                 <>
-                  <CopyButton value={content.content} label="Copy log contents" />
+                  <CopyButton value={copyValue} label="Copy log contents" />
                   <IconButton label="Open log in default editor" onClick={() => void openFile()}>
                     <ExternalLink />
                   </IconButton>
@@ -505,18 +641,52 @@ export function LogsPage() {
               <Switch checked={autoScroll} onChange={setAutoScroll} label="Auto scroll logs" />
               <span>Auto-scroll</span>
             </label>
-            {content ? (
+            <div className="logs-viewer__filters">
+              <select
+                className="input logs-level-filter"
+                value={levelFilter}
+                onChange={(event) => setLevelFilter(event.target.value as 'all' | LogLevel)}
+                aria-label="Filter log level"
+              >
+                <option value="all">All levels</option>
+                <option value="error">Errors</option>
+                <option value="warn">Warnings</option>
+                <option value="info">Info</option>
+                <option value="debug">Debug</option>
+              </select>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<AlertTriangle />}
+                onClick={jumpToIssue}
+                disabled={firstIssueIndex < 0}
+              >
+                First issue
+              </Button>
+              {modFilter ? (
+                <button
+                  type="button"
+                  className="log-mod-filter"
+                  onClick={() => setModFilter(null)}
+                  title="Clear mod filter"
+                >
+                  {modFilterName || modFilter}
+                  <X />
+                </button>
+              ) : null}
+            </div>
+            {sourceLines.length ? (
               <span>
-                {search
+                {search || levelFilter !== 'all' || modFilter
                   ? `${displayed.matchCount.toLocaleString()} matching line${displayed.matchCount === 1 ? '' : 's'}`
                   : `${displayed.matchCount.toLocaleString()} lines`}
                 {displayed.truncated ? ' · showing latest 5,000' : ''}
-                {content.truncated ? ' · file truncated' : ''}
+                {tail ? ' · following tail' : content?.truncated ? ' · file truncated' : ''}
               </span>
             ) : null}
           </div>
           <div className="logs-viewer__body">
-            {contentLoading && !content ? (
+            {contentLoading && !content && !tail ? (
               <div className="logs-viewer__loading">
                 <Spinner /> Reading log…
               </div>
@@ -534,24 +704,45 @@ export function LogsPage() {
                 title="Nothing selected"
                 description="Choose a log from the list to view launcher output, game output, or a crash report."
               />
-            ) : !content ? (
+            ) : !content && !tail ? (
               <div className="logs-viewer__loading">
                 <Spinner /> Reading log…
               </div>
             ) : displayed.lines.length === 0 ? (
               <EmptyState
                 icon={<Search />}
-                title={search ? 'No matching lines' : 'This log is empty'}
-                description={search ? 'Try a different search term.' : 'Minecraft hasn’t written anything to this file yet.'}
+                title={search || levelFilter !== 'all' || modFilter ? 'No matching lines' : 'This log is empty'}
+                description={
+                  search || levelFilter !== 'all' || modFilter
+                    ? 'Try a different search term or filter.'
+                    : 'Minecraft hasn’t written anything to this file yet.'
+                }
               />
             ) : (
               <pre ref={contentRef} className="log-output" spellCheck={false}>
-                {displayed.lines.map((line, index) => (
-                  <span key={index} className={cx('log-line', logLineClass(line))}>
-                    <HighlightedLine line={line || ' '} query={search.trim()} />
-                    {'\n'}
-                  </span>
-                ))}
+                {displayed.lines.map((line, index) => {
+                  const mod = line.mod
+                  return (
+                    <span
+                      key={index}
+                      data-line-index={index}
+                      className={cx('log-line', `is-${line.level}`)}
+                    >
+                      <HighlightedLine line={line.text || ' '} query={search.trim()} />
+                      {mod ? (
+                        <button
+                          type="button"
+                          className={cx('log-mod-chip', modFilter === mod.id && 'is-active')}
+                          onClick={() => setModFilter(mod.id)}
+                          title={`Show only ${mod.name}`}
+                        >
+                          {mod.name}
+                        </button>
+                      ) : null}
+                      {'\n'}
+                    </span>
+                  )
+                })}
               </pre>
             )}
           </div>
@@ -564,7 +755,7 @@ export function LogsPage() {
                   ? 'Game output captured by Aqua. Access tokens are redacted.'
                   : 'Crash reports are written by Minecraft. Inspect the stack trace for the cause.'}
             </span>
-            {content?.truncated ? <span>Showing the end of the file</span> : null}
+            {displayed.truncated ? <span>Showing the end of the file</span> : null}
           </div>
         </section>
       </div>
@@ -619,9 +810,9 @@ function LogFileButton({
   )
 }
 
-function logLineClass(line: string) {
-  if (/\bERROR\b|\bSEVERE\b|Exception|Caused by:/i.test(line)) return 'is-error'
-  if (/\bWARN\b|WARNING/i.test(line)) return 'is-warning'
-  if (/\bDEBUG\b|TRACE/i.test(line)) return 'is-dim'
-  return ''
+function lineLevelForText(line: string): LogLevel {
+  if (/\bERROR\b|\bSEVERE\b|\bFATAL\b|Exception|Caused by:/i.test(line)) return 'error'
+  if (/\bWARN(?:ING)?\b/i.test(line)) return 'warn'
+  if (/\bDEBUG\b|\bTRACE\b/i.test(line)) return 'debug'
+  return 'info'
 }

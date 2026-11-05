@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLauncher } from './state/LauncherProvider'
 import { Titlebar } from './components/layout/Titlebar'
-import { Sidebar } from './components/layout/Sidebar'
+import { NavigatorDock } from './components/layout/NavigatorDock'
 import { BootScreen } from './components/layout/BootScreen'
 import { LaunchErrorDialog } from './components/layout/LaunchErrorDialog'
+import { PreflightDialog } from './components/layout/PreflightDialog'
+import { ShortcutController } from './components/layout/ShortcutController'
 import { JoinWarningDialog } from './components/layout/JoinWarningDialog'
 import { CrashDialog } from './components/layout/CrashDialog'
 import { LinkIntentDialog } from './components/layout/LinkIntentDialog'
@@ -119,13 +121,14 @@ export default function App() {
       </a>
       <Titlebar />
       <div className="app-body">
-        <Sidebar />
         <main className="app-main" id="main-content" ref={mainRef} tabIndex={-1} aria-label="Aqua Launcher">
           <div className="app-page" key={routeKey}>
             <Page />
           </div>
         </main>
       </div>
+
+      <NavigatorDock />
 
       {loading ? (
         <div className="app-refresh-indicator" role="status" aria-live="polite">
@@ -144,11 +147,13 @@ export default function App() {
       <SetupWizard />
       <AuthModal />
       <LaunchErrorDialog />
+      <PreflightDialog />
       <JoinWarningDialog />
       <CrashDialog />
       <LinkIntentDialog />
       <DropImportOverlay />
       <CommandPalette />
+      <ShortcutController />
       <ToastHost toasts={toasts} onDismiss={dismissToast} />
     </div>
   )

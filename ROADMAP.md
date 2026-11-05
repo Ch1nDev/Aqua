@@ -138,6 +138,7 @@ Every package must satisfy all of these before it is marked done:
 | 4 | Platform reach | P4.1–P4.10 | Aqua is part of the desktop and plays Java, Bedrock, and Horizon |
 | 5 | Decision-gated bets | P5.1–P5.3 | Only after product sign-off; not part of the default sequence |
 | 6 | Polish and maintenance | P6.1–P6.6 | Launches are guarded, logs explain themselves, and maintenance is one action |
+| 7 | Migration and support | P7.1–P7.3 | Settings and profiles move safely, and support can reset or report without losing game data |
 
 ### Safe parallel workstreams
 
@@ -1269,11 +1270,11 @@ These are additive packages for after the current roadmap. None needs a product 
 **Contracts:** `launch:preflight`; no settings or store changes.
 
 **Done when:**
-- [ ] A missing client jar and an incompatible Java runtime block with a specific row.
-- [ ] Low disk names the free space and the 2 GB floor.
-- [ ] A warning can be dismissed for the session without hiding an error.
-- [ ] A healthy profile reaches the game with no extra click.
-- [ ] The disk and memory rules are covered by pure tests.
+- [x] A missing client jar and an incompatible Java runtime block with a specific row.
+- [x] Low disk names the free space and the 2 GB floor.
+- [x] A warning can be dismissed for the session without hiding an error.
+- [x] A healthy profile reaches the game with no extra click.
+- [x] The disk and memory rules are covered by pure tests.
 
 **Verify:** `node --test tests/preflight.test.js`; manual: break one game file, confirm the sheet and the Repair action.
 
@@ -1289,18 +1290,18 @@ These are additive packages for after the current roadmap. None needs a product 
 
 **Build:**
 - A session-only queue in the main process, one entry per installation, with `{ id, installationId, safeMode, requestedAt, reason }`. Never persist account or server secrets; the request reuses the normal launch path.
-- Queue when the game is running, when a launch is preparing, or when a profile is still installing (then wait for its `install` job). `launch:queue`, `launch:dequeue`, `launch:list`; broadcast `launch-queue` on every change.
+- Queue when the game is running, when a launch is preparing, or when a profile is still installing (then wait for its `install` job). `launch:queue`, `launch:dequeue`, `launch:list`, `launch:resume`; broadcast `launch-queue` on every change.
 - Drain on a clean exit only. A crash or failed launch leaves the queue paused with a visible retry action, so a broken profile is not launched automatically.
 - UI: Play becomes **Queue launch** while busy, with a small queued badge and a Tasks-page section for remove and **Launch now**.
 
-**Contracts:** `launch:queue`, `launch:dequeue`, `launch:list`; event `launch-queue`; no store changes.
+**Contracts:** `launch:queue`, `launch:dequeue`, `launch:list`, `launch:resume`; event `launch-queue`; no store changes.
 
 **Done when:**
-- [ ] Double Play queues one entry, not two and not an error.
-- [ ] A queued launch waits for an in-flight install.
-- [ ] Removing a queued entry never affects the running game.
-- [ ] A clean exit starts the next entry; a crash pauses it.
-- [ ] Queue ordering and deduplication are covered by tests.
+- [x] Double Play queues one entry, not two and not an error.
+- [x] A queued launch waits for an in-flight install.
+- [x] Removing a queued entry never affects the running game.
+- [x] A clean exit starts the next entry; a crash pauses it.
+- [x] Queue ordering and deduplication are covered by tests.
 
 **Verify:** `node --test tests/launch-queue.test.js`.
 
@@ -1317,18 +1318,18 @@ These are additive packages for after the current roadmap. None needs a product 
 **Build:**
 - `electron/core/log-tail.js` reads from a stored byte offset instead of re-reading the file, tolerates truncation and rotation, and returns at most 500 lines per batch. Attribute frames with the cached content index: match logger names and package segments to mod ids/names, keeping unknown lines unlabelled.
 - `logs:tail` starts/stops a watch for one log path; batch updates on a 250 ms timer and broadcast `logs:tail`. Stop on file change, game exit, or window close.
-- Viewer: Follow/Pause, text search across the tail, level filter, **Jump to first error**, and a mod chip on attributed lines that filters the view. Copy keeps the existing redaction.
+- Viewer: Follow/Pause, text search across the tail, level filter, **Jump to first issue** (the first error or warning), and a mod chip on attributed lines that filters the view. Copy keeps the existing redaction.
 - No regex input: a bad pattern must not freeze the renderer. Plain text only.
 
 **Contracts:** `logs:tail`; event `logs:tail`; no settings or store changes.
 
 **Done when:**
-- [ ] Follow adds only new bytes and survives a truncated file.
-- [ ] Pause holds the view while the file keeps growing.
-- [ ] Jump lands on the first error/warn line, not the first info line.
-- [ ] A Create/Forge-style frame is attributed to its mod; an unknown frame stays plain.
-- [ ] Switching sessions stops the old watcher.
-- [ ] Offset/rotation and attribution are covered by tests.
+- [x] Follow adds only new bytes and survives a truncated file.
+- [x] Pause holds the view while the file keeps growing.
+- [x] Jump lands on the first error/warn line, not the first info line.
+- [x] A Create/Forge-style frame is attributed to its mod; an unknown frame stays plain.
+- [x] Switching sessions stops the old watcher.
+- [x] Offset/rotation and attribution are covered by tests.
 
 **Verify:** `node --test tests/log-tail.test.js`; manual: launch, follow, search, and jump during a session.
 
@@ -1350,11 +1351,11 @@ These are additive packages for after the current roadmap. None needs a product 
 **Contracts:** `maintenance:verifyAll`, `maintenance:cancel`; job type `maintenance`; no settings or store changes.
 
 **Done when:**
-- [ ] Every installed profile is visited once, newest first.
-- [ ] A repaired profile reports the files it fetched; an already healthy one reports no change.
-- [ ] Cancel finishes the current profile and leaves the rest untouched.
-- [ ] One failure does not stop the batch.
-- [ ] Planning and summary logic are covered by tests.
+- [x] Every installed profile is visited once, newest first.
+- [x] A repaired profile reports the files it fetched; an already healthy one reports no change.
+- [x] Cancel finishes the current profile and leaves the rest untouched.
+- [x] One failure does not stop the batch.
+- [x] Planning and summary logic are covered by tests.
 
 **Verify:** `node --test tests/maintenance.test.js`.
 
@@ -1376,11 +1377,11 @@ These are additive packages for after the current roadmap. None needs a product 
 **Contracts:** `settings.window.placement`; no new IPC.
 
 **Done when:**
-- [ ] Every listed shortcut works and none fires while typing.
-- [ ] `?` opens and closes the cheat sheet, returning focus.
-- [ ] Position, size and maximized state survive a restart.
-- [ ] An off-screen saved position is clamped onto a visible display.
-- [ ] Clamping and shortcut normalization are covered by tests.
+- [x] Every listed shortcut works and none fires while typing.
+- [x] `?` opens and closes the cheat sheet, returning focus.
+- [x] Position, size and maximized state survive a restart.
+- [x] An off-screen saved position is clamped onto a visible display.
+- [x] Clamping and shortcut normalization are covered by tests.
 
 **Verify:** `node --test tests/shortcuts.test.js`.
 
@@ -1402,19 +1403,105 @@ These are additive packages for after the current roadmap. None needs a product 
 **Contracts:** `openFile` intent; no new IPC; packaged `fileAssociations`.
 
 **Done when:**
-- [ ] A `.mrpack` association opens the confirmation flow, not an import.
-- [ ] A foreign extension or missing path exits with a readable error.
-- [ ] A jump-list profile launches the right installation.
-- [ ] Portable mode leaves associations untouched.
-- [ ] File-intent validation is covered by tests.
+- [x] A `.mrpack` association opens the confirmation flow, not an import.
+- [x] A foreign extension or missing path exits with a readable error.
+- [x] A jump-list profile launches the right installation.
+- [x] Portable mode leaves associations untouched.
+- [x] File-intent validation is covered by tests.
 
-**Verify:** `node --test tests/file-intents.test.js`; manual: double-click one pack and one world on a packaged build.
+**Verify:** `node --test tests/file-associations.test.js`; manual: double-click one pack and one world on a packaged build.
 
 **Out of scope:** a shell context-menu verb, macOS/Linux associations, owning `.jar`.
 
 ---
 
-## 13. Backlog and triage
+## 13. Phase 7 — Migration and support
+
+These packages make a support request or a new PC recoverable. They use local files and explicit confirmation instead of accounts, cloud sync or telemetry. P7.1 and P7.2 are shipped; P7.3 is the next support-facing candidate.
+
+### P7.1 · Portable configuration transfer
+
+`H7` · **Effort S** · **Depends on:** P4.3
+
+**Outcome:** A player can move settings, themes, profile metadata and saved servers to another PC as one JSON file, without carrying accounts or game files and without overwriting the target machine.
+
+**Build:**
+- `electron/core/config-transfer.js` builds a versioned `aqua-config` document from a strict allowlist: portable preferences, theme, profile metadata and servers. Machine bindings (`defaultGameDir`, Java path, dashboard background, Microsoft client ID, window placement, launch-at-login), accounts, sessions, tokens, crashes, notifications, worlds, mods and logs are excluded.
+- `parseConfigDocument` validates the format and version before reading anything, caps the document at 5 MB and 50 profiles/100 servers, and skips malformed entries with a readable summary. Imported preferences are clamped to this PC's RAM and window limits; local paths and startup identity are always kept.
+- `planInstallations` skips exact name/version/loader duplicates, renames genuine name collisions and maps old profile ids to the target profiles. `planServers` reuses the normal address normalizer and skips duplicates or invalid addresses.
+- `config:export` opens a save dialog and writes atomically. `config:import` opens a file, confirms the add/skip counts, copies the current config to `config.before-import.json`, applies preferences through the normal validation path, creates profiles incrementally, preserves metadata and binds imported servers when their profile survived.
+- Settings → Transfer shows both actions, the counts from the last import, and warnings for skipped or failed rows. Existing profiles and servers are never deleted.
+
+**Contracts:** `config:export`, `config:import`; no store or settings additions.
+
+**Done when:**
+- [x] The export contains portable preferences, profiles and servers, but no account, token or machine path.
+- [x] A foreign, future or malformed document is rejected readably.
+- [x] Exact duplicates are skipped and name collisions become distinct profiles.
+- [x] Servers are normalized and duplicate addresses are skipped.
+- [x] Import preserves local Java, game folder, dashboard image, client ID and window placement.
+
+**Verify:** `node --test tests/config-transfer.test.js`; manual: export on one PC and import on a second, then launch an imported profile.
+
+**Out of scope:** cloud sync, automatic overwrite, accounts/tokens, worlds, mods, screenshots, game files, background transfer.
+
+---
+
+### P7.2 · Safe factory reset
+
+`H8` · **Effort S** · **Depends on:** P7.1
+
+**Outcome:** A player or support volunteer can return the launcher to a clean slate without accidentally deleting worlds, mods or the export they just made.
+
+**Build:**
+- `electron/core/factory-reset.js` builds a read-only preview from fixed categories: settings, profile metadata, servers, activity/notifications/crashes, caches and logs. Cache and log sizes come from a bounded walk that never follows a symlink or Windows junction; game directories, worlds, mods, backups and exported config files are outside the scope.
+- Settings → Reset offers **Export first** in the same sheet. Apply needs the token from the immediately preceding preview plus the exact word `RESET`; cancel or a stale/blocked preview leaves every file untouched.
+- `Store.resetLauncherData()` recreates defaults through the existing settings path and keeps accounts, `activeAccountId` and `accounts.bin` untouched. The config is copied to `config.before-reset.json` before the write, `reset-complete.json` records the result, and the renderer reloads through `retryBoot()` so first-run setup opens.
+- Clear only `cacheRoot` and `logsRoot`; each path must exactly match the owned root. Linked entries are removed without following them, cycles are skipped, and locked files become warnings rather than a partial failure disguised as success.
+
+**Contracts:** `reset:preview`, `reset:apply`, `reset:cancel`; `Store.resetLauncherData()`; no new store fields, settings keys or dependencies.
+
+**Done when:**
+- [x] The preview names every category and its reclaimable size before applying.
+- [x] A reset cannot reach a game directory, world, mod, backup or export.
+- [x] Cancel and a failed write leave the previous configuration usable.
+- [x] Accounts and encrypted tokens survive unless the user explicitly chooses to remove them.
+- [x] The post-reset launcher can complete first-run setup.
+
+**Verify:** `node --test tests/safe-reset.test.js` (6 tests); manual: reset a copy of a data folder, inspect the backup/marker, and relaunch.
+
+**Out of scope:** uninstalling Aqua, deleting game data, removing accounts by default, reinstalling Minecraft versions.
+
+---
+
+### P7.3 · Local issue-report helper
+
+`G8` · **Effort S–M** · **Depends on:** P6.3, P7.1, D6
+
+**Outcome:** A player can produce a scrubbed, reviewable report with versions, recent errors and active-profile context, then choose whether to open a GitHub issue.
+
+**Build:**
+- Build the report in the main process from existing diagnostics: app/Electron/OS, Java, selected profile and loader, last crash classification, filtered errors and a short log excerpt. Reuse `logs:exportDiagnostics` rather than adding a second collector.
+- Redact absolute user paths, account names, server addresses, tokens, client IDs and downloaded-file URLs. Keep counts and versions; show the exact text in an editable preview before anything leaves the app.
+- **Copy report** and **Open GitHub issue** only; prefill the issue body through a URL with a length cap. No automatic upload, telemetry or background request. D6 defaults to local-only.
+- Cap the excerpt and strip control characters so a malformed log cannot break the preview or the issue URL.
+
+**Contracts:** `report:preview`, `report:openIssue`; no new store fields.
+
+**Done when:**
+- [ ] A report contains app, system, Java, profile and crash context without secrets or absolute paths.
+- [ ] The preview is editable and can be copied without opening a browser.
+- [ ] A failed or oversized issue URL falls back to the copied report.
+- [ ] No network request is made until the user opens the issue.
+- [ ] Redaction covers Windows, macOS and Linux path shapes.
+
+**Verify:** `node --test tests/issue-report.test.js`; manual: copy one report and inspect it before opening an issue.
+
+**Out of scope:** automatic upload, telemetry, attaching full logs, creating issues without a GitHub account.
+
+---
+
+## 14. Backlog and triage
 
 Everything in [FEATURE_IDEAS.md](FEATURE_IDEAS.md) that is not in a phase above remains **unapproved**. Do not implement it opportunistically.
 
@@ -1433,16 +1520,16 @@ Strong candidates for the next planning round, in rough order:
 | Trust | A3, A5, A9 | Snapshots, pre-launch checks, and launch queue deepen the Phase 1 story |
 | Content | B15, B17 | One-click performance and provenance (B11 shipped as P2.10) |
 | Servers | C7 (if not done), C10, C13 | Polish and service status complete the server list |
-| UX | F3, F13, F19 | Shortcuts, what's-new, window placement |
+| UX | F13 | What's-new; F3 and F19 shipped in P6.5 |
 | Diagnostics | G1, G2, G5, G8 | Log tailing, mod attribution, network diagnostics, issue reports |
-| Storage | H3, H5, H7 | Verify-all, low-disk preflight, config export |
-| Platform | I9, I10, I12 | File associations, jump list, CI |
+| Storage | H3, H5 | Verify-all and low-disk preflight |
+| Platform | I12 | CI; I9 and I10 shipped in P6.6 |
 
 Explicitly parked unless the product direction changes: social features, chat, cloud accounts, ads, crypto, a Tauri rewrite.
 
 ---
 
-## 14. Proposed contracts (reserve names before use)
+## 15. Proposed contracts (reserve names before use)
 
 Use these names so parallel work does not collide. If a package needs a different shape, update this table in the same change set.
 
@@ -1470,9 +1557,11 @@ Use these names so parallel work does not collide. If a package needs a differen
 | `app:route` | P4.1 | Deep-link/CLI actions into the renderer |
 | `app:rendererReady`, `app:linkStatus`, `app:registerLinks` | P4.1 | Link routing readiness and scheme state |
 | `launch:preflight` | P6.1 | Checklist rows before a launch |
-| `launch:queue`, `launch:dequeue`, `launch:list` | P6.2 | Session-only launch queue |
+| `launch:queue`, `launch:dequeue`, `launch:list`, `launch:resume` | P6.2 | Session-only launch queue |
 | `logs:tail` | P6.3 | Incremental game-log tail |
 | `maintenance:verifyAll`, `maintenance:cancel` | P6.4 | Batch integrity check |
+| `config:export`, `config:import` | P7.1 | Portable, allow-listed JSON configuration transfer |
+| `reset:preview`, `reset:apply`, `reset:cancel` | P7.2 | Preview, guarded reset and cancellation |
 | `mods:checkUpdates`, `mods:update` | P2.10 | Installed-content updates |
 | `mods:retargetInfo`, `mods:retarget`, `mods:retargetUndo` | P2.11 | Cross-version mod retargeting |
 | `minecraftSettings:status|capture|apply|applyAll` | P3.7 | Shared client settings |
@@ -1481,6 +1570,13 @@ Use these names so parallel work does not collide. If a package needs a differen
 | `horizon:mods`, `horizon:importMod`, `horizon:toggleMod`, `horizon:removeMod`, `horizon:modsFolder`, `horizon:registry`, `horizon:installProject`, `horizon:nativeStatus`, `horizon:buildNative`, `horizon:cancelNativeBuild` | P4.8 | Horizon content and native builds |
 | `bedrock:addons`, `bedrock:importAddon`, `bedrock:removeAddon`, `bedrock:addonFolder` | P4.9 | Bedrock packs |
 | `bedrock:versions`, `bedrock:downloadVersion`, `bedrock:cancelVersion`, `bedrock:removeVersion`, `bedrock:registerVersion`, `bedrock:installVersion` | P4.10 | Bedrock builds |
+
+### Routed intents
+
+| Intent | Package | Notes |
+|---|---|---|
+| `launch`, `join`, `install`, `open` | P4.1 | `aqua://` links and the CLI; validated before `app:route` |
+| `openFile` | P6.6 | One absolute, existing `.mrpack`, `.mcpack`, `.mcaddon`, or `.mcworld`; confirmation required |
 
 ### Store and settings additions
 
@@ -1513,7 +1609,7 @@ Use these names so parallel work does not collide. If a package needs a differen
 
 ---
 
-## 15. Decisions needed
+## 16. Decisions needed
 
 | ID | Decision | Blocks | Default if unanswered |
 |---|---|---|---|
@@ -1529,7 +1625,7 @@ Record the answer and date in the changelog when decided.
 
 ---
 
-## 16. Progress tracker
+## 17. Progress tracker
 
 Status values: `todo` · `in progress` · `blocked` · `done`. Keep the note short: owner, PR/commit, blocker, or the next concrete step. An `in progress` row is a claim: other agents should not edit the files listed there without coordinating.
 
@@ -1577,19 +1673,29 @@ Status values: `todo` · `in progress` · `blocked` · `done`. Keep the note sho
 | P5.1 Server manager | blocked | D5 |
 | P5.2 Server pack sync | blocked | P5.1/P2.6 |
 | P5.3 World map | blocked | product decision |
-| P6.1 Pre-launch checklist | todo | Needs a preflight rule table on top of the health cache; see P6.1. |
-| P6.2 Launch queue | todo | Session-only queue; depends on P6.1 for the Play flow. |
-| P6.3 Log tail + mod attribution | todo | Incremental reader plus content-index attribution; no regex. |
-| P6.4 Verify-all maintenance | todo | Batch verification job reusing the installer and health checks. |
-| P6.5 Shortcuts + window placement | todo | Shared shortcut table, cheat sheet, clamped placement persistence. |
-| P6.6 File associations + jump list | todo | Packaged associations, validated `openFile` intent, jump-list entries. |
+| P6.1 Pre-launch checklist | done | Buffy · 2026-11-03 · `electron/core/preflight.js` combines the Health cache with live free-space and memory readings. Missing client files, failing health checks, 32-bit Java and under 2 GB free block; 2–5 GB free and memory above 70% warn. `launch:preflight` validates the profile and reads `statfs`; Play opens one sheet per profile per session, with the allow-listed health fixes, and launches directly when healthy. Errors cannot be dismissed. 7 preflight tests plus a 32-bit health case; 313 tests total. P6.2 is next. |
+| P6.2 Launch queue | done | Buffy · 2026-11-03 · Session-only FIFO queue in `electron/core/launch-queue.js`, one entry per installation and capped at 20. Play queues while the game is preparing/running or an install is active; the queue waits for the install job, advances only after a clean exit, and pauses with a Tasks-page retry after a crash or failed queued launch. `launch:queue`/`dequeue`/`list`/`resume` and the `launch-queue` event keep every window in sync. Tasks shows each entry with Launch now/remove; Home shows **Queue launch** and a queued badge. 5 new tests; 318 total. P6.3 is next. |
+| P6.3 Log tail + mod attribution | done | Buffy · 2026-11-03 · `electron/core/log-tail.js` polls one file on a 250 ms timer, reads only bytes after the stored offset, holds partial lines, caps each batch at 500, and resets on truncation, replacement, game exit, or window close. Game logs are attributed from the cached content index by logger/package tokens; unknown frames stay plain. Logs now has Follow/Pause, level and mod filters, first-issue jump, and copy of the followed tail; the old whole-file 3-second poll is gone. 8 new tests; 326 total. P6.4 is next. |
+| P6.4 Verify-all maintenance | done | Buffy · 2026-11-03 · `electron/core/maintenance.js` plans installed profiles newest-first and runs one cancellable `maintenance` job. It reuses `Installer.install` for SHA-1 verification and repair, before/after `HealthService` snapshots for each profile, and records the downloaded file and byte counts. One profile failure is isolated; cancellation finishes the current profile and stops before the next. Settings → Troubleshooting has **Verify all**, cooperative cancel, live profile progress, and per-profile before/after/repair rows. `maintenance:verifyAll`/`cancel` are wired through preload and the API. 6 new tests; 332 total. P6.5 is next. |
+| P6.5 Shortcuts + window placement | done | Buffy · 2026-11-03 · `src/lib/shortcuts.ts` is the single binding table for the global handler, titlebar hint and focus-trapped `?` sheet: `Ctrl+K`, `Ctrl+Enter`, `Alt+1…9`, `Ctrl+,` and `Esc`, with all typing surfaces excluded. `electron/core/window-placement.js` normalizes and clamps `settings.window.placement` onto the nearest visible work area; `main.js` restores it before `show()`, persists move/resize/maximize changes after a short debounce, flushes on close, and re-maximizes at the right time. 9 new tests; 341 total. P6.6 is next. |
+| P6.6 File associations + jump list | done | Buffy · 2026-11-03 · The installer advertises `.mrpack`, `.mcpack`, `.mcaddon` and `.mcworld`; the CLI/second-instance parser turns one absolute existing file into an `openFile` intent with extension and size validation, and the existing link dialog confirms before inspecting a pack or importing a Bedrock pack/world. `electron/core/jump-list.js` builds five recent installed profiles plus the last server as `aqua://` tasks; main refreshes it on install and server changes, and skips development and portable builds. 5 new tests; 346 total. Phase 6 is complete. Manual packaged double-click/restart smoke test remains. |
+| P7.1 Portable configuration transfer | done | Buffy · 2026-11-03 · `electron/core/config-transfer.js` builds a versioned allow-listed document: portable preferences, theme, profile metadata and servers. Accounts, tokens, paths, worlds, mods and logs never enter the export. `parseConfigDocument` enforces format/version, 5 MB and row caps, skips malformed rows and reports warnings. Import preserves machine-specific paths and launch-at-login, clamps memory/window values, backs up `config.json`, skips exact duplicates, renames collisions, maps server bindings, and confirms add/skip counts before applying. Settings → Transfer uses the normal settings/store paths. 6 new tests; 352 total. Phase 7 opened with P7.2 safe reset and P7.3 local issue report. Manual two-PC smoke test remains. |
+| P7.2 Safe factory reset | done | Buffy · 2026-11-03 · `electron/core/factory-reset.js` builds a six-row preview from fixed categories and measures only `cacheRoot`/`logsRoot` without following symlinks or junctions. Apply requires the preview token and exact `RESET`, rechecks the game/job/queue/backup guards, copies `launcher.json` to `config.before-reset.json`, and calls `Store.resetLauncherData()` to restore defaults while preserving accounts, `activeAccountId` and `accounts.bin`. Cleanup is limited to the two owned roots, removes links without following them, skips cycles, and reports locked entries as warnings. Settings → Reset offers Export first, category counts/sizes, preserved-data notes and a typed confirmation; success reloads through `retryBoot()` so first-run setup opens. 6 new tests; 358 total. Manual reset of a copied data folder remains. |
+| P7.3 Local issue report | todo | Scrub and preview diagnostics locally, then copy or open a prefilled GitHub issue. Needs D6 to stay local-only. |
 
 ---
 
-## 17. Changelog
+## 18. Changelog
 
 | Date | Change |
 |---|---|
+| 2026-11-03 | P7.2 Safe factory reset: Settings → Reset previews launcher settings, profile metadata, servers, history, caches and logs with exact counts and reclaimable sizes. Apply requires a one-time preview token and the word `RESET`, then saves `config.before-reset.json`, writes `reset-complete.json`, restores first-run defaults through the Store and clears only the launcher cache and log roots. Accounts and encrypted tokens stay signed in; worlds, mods, backups, exports and game folders are never touched. Linked entries are removed without following them, cycles and locked files are handled safely, and a running game, active job, backup or queued launch blocks the reset. 6 new tests; 358 total. |
+| 2026-11-03 | P6.4 Verify-all maintenance: Settings → Troubleshooting can now check every installed profile in one pass. Profiles are visited newest-first as a cancellable `maintenance` job; the installer's existing verification path repairs missing or damaged game files, and a fresh Health check records each profile's before/after state. The summary counts checked, healthy, repaired, attention and failed profiles, lists repaired files and bytes, and keeps one broken profile from stopping the batch. Cancel is cooperative and lets the current profile finish. `maintenance:verifyAll` and `maintenance:cancel` are wired through IPC, preload and the API; Tasks and the job notification channel show the run. 6 new tests; 332 total. |
+| 2026-11-03 | P6.5 Shortcuts and window placement: one binding table now drives the global handler, titlebar search hint and a focus-trapped `?` cheat sheet. `Ctrl+K` opens search, `Ctrl+Enter` launches the Play target, `Alt+1…9` follow sidebar order, `Ctrl+,` opens Settings, and `Escape` still closes the top layer; all shortcuts stay out of text fields, selects and contenteditable surfaces. Aqua persists the launcher window's position, size and maximized state as `settings.window.placement`, restores it before the window is shown, and clamps a saved rectangle onto the nearest visible display after a monitor disappears. A first run keeps the 1400×880 fallback and centers it. 9 new tests; 341 total. |
+| 2026-11-03 | P7.1 Portable configuration transfer: Settings → Transfer exports a versioned JSON document containing portable preferences, themes, profile metadata and saved servers. Accounts, tokens, absolute paths, worlds, mods, screenshots and game files are deliberately excluded. Import validates format/version, size and row caps; rejects foreign or future files; confirms add/skip counts; backs up the current config; preserves Java, game folder, dashboard image, Microsoft client ID, window placement and launch-at-login; clamps memory and window values to the target PC; skips exact duplicate profiles and servers; renames genuine name collisions; and maps server bindings to imported profiles. Malformed rows and per-profile failures are reported without stopping the rest. 6 new tests; 352 total. Phase 7 opened with P7.2 safe reset and P7.3 local issue report. |
+| 2026-11-03 | P6.6 Windows file associations and jump list: the packaged build claims `.mrpack`, `.mcpack`, `.mcaddon` and `.mcworld`, and every double-click goes through the existing confirmation sheet. The parser accepts one absolute, existing file and rejects unknown extensions, folders, empty files, oversized archives and extra arguments. Confirming inspects a modpack before import, or installs a Bedrock pack/world through the normal add-on service; the source is never moved. The Windows taskbar jump list now lists the five most recent installed profiles and the last saved server, reusing `aqua://` launch/join intents and rebuilding after profile or server changes. Development and portable builds never write taskbar entries. 5 new tests; 346 total. |
+| 2026-11-03 | P6.3 Log tail and mod attribution: game and launcher logs can be followed live without re-reading the file. `logs:tail` starts/stops a 250 ms watcher, reads only appended bytes, holds partial lines, caps batches at 500, and resets when the file is truncated or replaced. Game lines are attributed to enabled mods through the cached content index by logger and package tokens, while unknown frames stay plain. The viewer adds Follow/Pause, level and mod filters, a first error/warning jump, and copy of the followed tail; the watcher stops on selection change, game exit, window close, or read failure. 8 new tests; 326 total. |
+| 2026-11-03 | P6.2 Launch queue: Play while another launch is preparing, a game is running, or a profile is installing now becomes a single queued entry instead of an error or a toast. The queue is session-only, FIFO, capped at 20, and deduplicated per installation; it waits for an active install job, advances only after a clean game exit, and pauses with a visible retry action after a crash, failed queued launch, or failed install. Tasks lists every entry with **Launch now** and remove, while Home turns Play into **Queue launch** and shows a queued badge. `launch:queue`, `launch:dequeue`, `launch:list` and `launch:resume` are wired through the preload/API and `launch-queue` events. 5 new tests; 318 total. |
 | 2026-11-03 | P4.4 Discord Rich Presence: opt-in and off by default. Aqua talks to Discord's local IPC socket directly (no SDK or dependency), publishes the instance, Minecraft version, loader and elapsed time, and clears presence on exit, crash, disable or disconnect. A second switch exposes the server address and a Join action; incoming requests use the existing confirmation flow. Missing Discord retries with backoff and logs one debug line. 11 new tests. The roadmap gained **Phase 6** (P6.1–P6.6): pre-launch checklist, launch queue, log tail and mod attribution, verify-all maintenance, shortcuts/window placement, and Windows file associations/jump list. Live presence requires a registered Discord application ID supplied through `AQUA_DISCORD_CLIENT_ID`. |
 | 2026-11-02 | P4.5 Accessibility: added **Skip to content**, live-region announcements for page changes and completed/failed/cancelled jobs, `aria-describedby` on modal subtitles, focus return for the notification popover, and current-section semantics. Settings → Display now exposes **High contrast** and **Reduce transparency**, backed by an opaque high-contrast token palette and non-blurred surfaces; reduced motion now disables CSS animation and transitions entirely. Small icon buttons, switches and chips gained 32×32 targets, and a WCAG contrast regression test covers body text on the major surfaces. 3 new tests; manual NVDA/keyboard smoke test remains. |
 | 2026-10-28 | Initial roadmap created from `FEATURE_IDEAS.md`; 33 packages across six phases. |

@@ -75,16 +75,6 @@ export function openCommandPalette() {
   window.dispatchEvent(new Event(OPEN_EVENT))
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false
-  return (
-    target.isContentEditable ||
-    target.tagName === 'INPUT' ||
-    target.tagName === 'TEXTAREA' ||
-    target.tagName === 'SELECT'
-  )
-}
-
 function groupTitle(group: CommandGroup) {
   return group
 }
@@ -180,22 +170,12 @@ export function CommandPalette() {
   }, [])
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'k') return
-      const modalOpen = Boolean(document.querySelector('.modal-overlay'))
-      if (!open && (isEditableTarget(event.target) || modalOpen)) return
-      event.preventDefault()
-      if (open) close()
-      else setOpen(true)
-    }
     const onOpen = () => setOpen(true)
-    window.addEventListener('keydown', onKeyDown)
     window.addEventListener(OPEN_EVENT, onOpen)
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener(OPEN_EVENT, onOpen)
     }
-  }, [close, open])
+  }, [])
 
   const remember = useCallback((id: string) => {
     setRecentIds((current) => {

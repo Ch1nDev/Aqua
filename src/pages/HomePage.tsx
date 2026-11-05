@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Boxes,
   ChevronRight,
+  Clock,
   Coffee,
   Cpu,
   Download,
@@ -15,37 +16,36 @@ import {
   Plus,
   RefreshCw,
   Server,
-  Settings,
   ShieldCheck,
   UserRound,
+  Wrench,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
 import { bedrockDropVersion, HORIZON_DROP_VERSION } from '../lib/artwork'
 import { useNow } from '../lib/hooks'
-import {
-  elapsedSince,
-  formatEta,
-  formatPlaytime,
-  relativeTime,
-  shortPath,
-  versionTypeLabel,
-} from '../lib/format'
-import { MICROSOFT_AUTH_ENABLED } from '../lib/features'
+import { elapsedSince, formatEta, formatPlaytime, relativeTime, shortPath } from '../lib/format'
 import { loaderLabel } from '../lib/loaders'
 import { useLauncher } from '../state/LauncherProvider'
 import type { ActivityEntry, DownloadJob, Installation, LoaderType, ServerEntry } from '../lib/types'
-import { LoaderMark, PackIcon, VoxelScene } from '../components/brand/Brand'
-import { TitleArtwork, useHeroArtwork } from '../components/brand/Artwork'
+import { EditionMark, LoaderMark, PackIcon, VersionMark, VoxelScene, bedrockEditionKind } from '../components/brand/Brand'
+import { useHeroArtwork } from '../components/brand/Artwork'
 import { AccountSwitcherToggle } from '../components/home/AccountSwitcherToggle'
 import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
 import { EmptyState, Spinner, cx } from '../components/ui/primitives'
 
-function greetingForHour(hour: number) {
-  if (hour < 5) return 'Good night'
-  if (hour < 12) return 'Good morning'
-  if (hour < 18) return 'Good afternoon'
-  return 'Good evening'
+
+/**
+ * The artwork for a Java installation: the dirt block marks a snapshot, while a
+ * release or a pack uses the loader's own cube.
+ */
+function versionIcon(installation: Installation, size: number) {
+  if (installation.versionType === 'snapshot' && !installation.modpack) {
+    return <VersionMark type="snapshot" size={size} />
+  }
+  return (
+    <PackIcon modpack={installation.modpack} loader={installation.loader?.type ?? 'vanilla'} size={size} />
+  )
 }
 
 function activityIcon(entry: ActivityEntry) {
@@ -78,14 +78,13 @@ function findInstallJob(jobs: DownloadJob[], installationId: string | undefined)
 
 export function HomePage() {
   const {
-    data,
     settings,
     installations,
-    activeAccount,
     selectedInstallation,
     activity,
     jobs,
     game,
+    launchQueue,
     launchingId,
     versions,
     navigate,
@@ -94,6 +93,7 @@ export function HomePage() {
     joinServer,
     installGame,
     launchGame,
+    launchQueued,
     pushToast,
     openInstallationFolder,
     bedrock,
@@ -124,6 +124,7 @@ export function HomePage() {
   useNow(gameRunning || gamePreparing)
 
   const [dashboardBackground, setDashboardBackground] = useState<string | null>(null)
+  const [safeMode, setSafeMode] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -204,6 +205,34 @@ export function HomePage() {
   const isPreparingSelected =
     targetIsJava &&
     ((gamePreparing && game.installationId === selectedInstallation?.id) || launchingId === selectedInstallation?.id)
+  const queuedEntry = targetIsJava
+    ? launchQueue.entries.find((entry) => entry.installationId === selectedInstallation?.id)
+    : undefined
+  // The corner mark follows the target, not just modded profiles: vanilla uses
+  // the Java block, and the other editions use their own block art.
+  const showLoaderMark = targetIsJava && Boolean(selectedInstallation)
+  const loaderTitle = loaderType === 'vanilla' ? 'Java Edition' : `${loaderLabel(loaderType)} mod loader`
+  // The grass block is a release and the dirt block is a snapshot, so a snapshot
+  // profile shows the snapshot artwork instead of the loader's own cube.
+  const snapshotSelected = Boolean(
+    targetIsJava &&
+      selectedInstallation &&
+      selectedInstallation.versionType === 'snapshot' &&
+      !selectedInstallation.modpack,
+  )
+  const canToggleSafeMode =
+    targetIsJava &&
+    Boolean(selectedInstallation?.installed) &&
+    !installJob &&
+    !isPreparingSelected &&
+    !isPlayingSelected &&
+    !otherGameRunning
+
+  // Safe Mode belongs to the profile you are about to launch, so it starts off
+  // again whenever the dashboard target changes.
+  useEffect(() => {
+    setSafeMode(false)
+  }, [selectedInstallation?.id])
   const recentItems = useMemo(() => {
     const playedInstallations = installations
       .filter((installation) => installation.lastPlayedAt)
@@ -221,15 +250,13 @@ export function HomePage() {
   }, [installations, recentServers])
 
   const recentActivity = activity.slice(0, 5)
-  const hour = new Date().getHours()
-  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 
   let playLabel = 'Play'
   let playIcon = <Play />
   let playBusy = false
   if (targetIsBedrock) {
-    playLabel = 'Play'
-    playIcon = <Boxes />
+    playLabel = bedrockTarget?.editor ? 'Launch Editor' : 'Play'
+    playIcon = bedrockTarget?.editor ? <Wrench /> : <Boxes />
   } else if (targetIsHorizon) {
     if (launchingHorizonTag === horizonTarget?.tag) {
       playLabel = 'Launching'
@@ -239,17 +266,13 @@ export function HomePage() {
       playLabel = 'Play'
       playIcon = <Cpu />
     }
-  } else if (installJob) {
-    playLabel = installJob.progress != null ? `Installing ${installJob.progress}%` : 'Installing'
-    playIcon = <Download />
+  } else if (installJob || isPreparingSelected || isPlayingSelected || otherGameRunning) {
+    playLabel = 'Queue launch'
+    playIcon = <Clock />
     playBusy = true
-  } else if (isPreparingSelected) {
-    playLabel = 'Launching'
-    playIcon = <Spinner label="Launching Minecraft" />
-    playBusy = true
-  } else if (isPlayingSelected) {
-    playLabel = 'In game'
-    playIcon = <Gamepad2 />
+  } else if (queuedEntry) {
+    playLabel = 'Queued'
+    playIcon = <Clock />
   } else if (selectedInstallation && !selectedInstallation.installed) {
     playLabel = 'Install & play'
     playIcon = <Download />
@@ -274,22 +297,18 @@ export function HomePage() {
       return
     }
     if (!selectedInstallation) return
-    if (isPlayingSelected) {
-      navigate('logs', { category: 'game', installationId: selectedInstallation.id })
+    // A queued request can be started directly while nothing is busy; remove
+    // that exact entry so it cannot launch a second time after the exit.
+    if (queuedEntry && !installJob && !isPreparingSelected && !isPlayingSelected && !otherGameRunning) {
+      void launchQueued(queuedEntry)
       return
     }
-    if (installJob) {
-      navigate('installations')
+    if (safeMode) {
+      void launchGame(selectedInstallation.id, { safeMode: true })
       return
     }
     void play(selectedInstallation.id)
   }
-
-  const subtitle = activeAccount
-    ? 'Launch your Play target or manage installations, versions, and logs.'
-    : MICROSOFT_AUTH_ENABLED
-      ? 'Add an offline or Microsoft profile to launch the game. You can create an installation first if you prefer.'
-      : 'Add an offline profile to launch the game. You can create an installation first if you prefer.'
 
   return (
     <div
@@ -312,9 +331,14 @@ export function HomePage() {
         )}
         <div className="hero__grid">
           <PageHeader
-            kicker={today}
-            title={activeAccount ? `${greetingForHour(hour)}, ${activeAccount.name}` : greetingForHour(hour)}
-            subtitle={subtitle}
+            title={
+              <img
+                className="page-header__logo"
+                src="artwork/aqua/aquawordmark.png"
+                alt="Aqua Launcher"
+                draggable={false}
+              />
+            }
             actions={
               selectedInstallation || bedrockTarget || horizonTarget ? (
                 <div className="hero__play-actions">
@@ -327,17 +351,6 @@ export function HomePage() {
                     {playIcon}
                     <span>{playLabel}</span>
                   </button>
-                  {targetIsJava && selectedInstallation && selectedInstallation.installed && !installJob && !isPreparingSelected && !isPlayingSelected && !otherGameRunning ? (
-                    <button
-                      type="button"
-                      className="btn btn--safe"
-                      onClick={() => void launchGame(selectedInstallation.id, { safeMode: true })}
-                      title="Launch without mods, resource packs, or shaders"
-                    >
-                      <ShieldCheck />
-                      <span>Safe Mode</span>
-                    </button>
-                  ) : null}
                   {targetIsJava && selectedInstallation ? (
                     <AccountSwitcherToggle
                       key={selectedInstallation.id}
@@ -351,27 +364,8 @@ export function HomePage() {
           />
 
           <div className="hero__topline">
-            <div className="hero__brandline">
-              <TitleArtwork height="clamp(42px, 5vw, 64px)" />
-            </div>
             <div className="hero__badges">
-              {targetIsBedrock ? <span className="hero__tag hero__tag--bedrock">Bedrock Edition</span> : null}
-              {targetIsHorizon ? <span className="hero__tag hero__tag--horizon">Horizon · Rust Edition</span> : null}
-              {targetIsJava && selectedInstallation && selectedInstallation.versionType !== 'release' ? (
-                <span className={cx('hero__tag', `hero__tag--${selectedInstallation.versionType}`)}>
-                  {versionTypeLabel(selectedInstallation.versionType)}
-                </span>
-              ) : null}
-              {targetIsJava && loaderType !== 'vanilla' ? (
-                <span
-                  className="hero__loader"
-                  role="img"
-                  aria-label={`${loaderLabel(loaderType)} mod loader`}
-                  title={`${loaderLabel(loaderType)} mod loader`}
-                >
-                  <LoaderMark type={loaderType} size={56} />
-                </span>
-              ) : null}
+              {queuedEntry ? <span className="hero__tag">Queued</span> : null}
             </div>
           </div>
 
@@ -380,13 +374,18 @@ export function HomePage() {
               <div className="hero__installation">
                 <button type="button" className="hero__installation-main" onClick={() => navigate('installations')}>
                   <span className="hero__installation-icon">
-                    <Boxes size={20} />
+                    <EditionMark
+                      edition={bedrockEditionKind(bedrockTarget.id)}
+                      size={20}
+                      fallback={<Boxes size={20} />}
+                    />
                   </span>
                   <span className="hero__installation-copy">
                     <span className="hero__installation-name">{bedrockTarget.name}</span>
                     <span className="hero__installation-version">
-                      {bedrockTarget.version ? `Bedrock ${bedrockTarget.version}` : 'Store edition'} · From the Microsoft
-                      Store
+                      {bedrockTarget.editor
+                        ? `Editor mode · ${bedrockTarget.version ? `Minecraft ${bedrockTarget.version}` : 'Included with Minecraft'}`
+                        : `${bedrockTarget.version ? `Bedrock ${bedrockTarget.version}` : 'Store edition'} · From the Microsoft Store`}
                     </span>
                   </span>
                 </button>
@@ -407,7 +406,7 @@ export function HomePage() {
               <div className="hero__installation">
                 <button type="button" className="hero__installation-main" onClick={() => navigate('installations')}>
                   <span className="hero__installation-icon">
-                    <Cpu size={20} />
+                    <EditionMark edition="horizon" size={20} fallback={<Cpu size={20} />} />
                   </span>
                   <span className="hero__installation-copy">
                     <span className="hero__installation-name">Horizon</span>
@@ -438,7 +437,7 @@ export function HomePage() {
               <div className="hero__installation">
                 <button type="button" className="hero__installation-main" onClick={() => navigate('installations')}>
                   <span className="hero__installation-icon">
-                    <PackIcon modpack={selectedInstallation.modpack} loader={loaderType} size={20} />
+                    {versionIcon(selectedInstallation, 20)}
                   </span>
                   <span className="hero__installation-name">{selectedInstallation.name}</span>
                 </button>
@@ -465,11 +464,9 @@ export function HomePage() {
               <div className="hero__installation hero__installation--empty">
                 <span className="hero__installation-icon">
                   <Layers />
-                </span>
-                <span className="hero__installation-copy">
-                  <span className="hero__installation-name">No installation yet</span>
-                  <span className="hero__installation-version">Create a profile to start playing</span>
-                </span>
+                </span>                  <span className="hero__installation-copy">
+                    <span className="hero__installation-name">No installation yet</span>
+                  </span>
               </div>
             )}
 
@@ -516,6 +513,55 @@ export function HomePage() {
               </div>
             ) : null}
           </div>
+
+          {showLoaderMark || targetIsBedrock || targetIsHorizon ? (
+            <div className="hero__mark">
+              {targetIsBedrock ? (
+                <span
+                  className="hero__loader hero__loader--edition"
+                  role="img"
+                  aria-label={bedrockTarget?.name ?? 'Bedrock Edition'}
+                  title={bedrockTarget?.name ?? 'Bedrock Edition'}
+                >
+                  <EditionMark edition={bedrockEditionKind(bedrockTarget?.id)} size={70} />
+                </span>
+              ) : null}
+              {targetIsHorizon ? (
+                <span
+                  className="hero__loader hero__loader--edition"
+                  role="img"
+                  aria-label="Horizon · Rust Edition"
+                  title="Horizon · Rust Edition"
+                >
+                  <EditionMark edition="horizon" size={70} />
+                </span>
+              ) : null}
+              {showLoaderMark ? (
+                <span
+                  className="hero__loader"
+                  role="img"
+                  aria-label={snapshotSelected ? 'Snapshot' : loaderTitle}
+                  title={snapshotSelected ? 'Snapshot' : loaderTitle}
+                >
+                  {snapshotSelected ? <VersionMark type="snapshot" size={70} /> : <LoaderMark type={loaderType} size={70} />}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {canToggleSafeMode ? (
+            <button
+              type="button"
+              className={cx('safe-mode', safeMode && 'is-on')}
+              onClick={() => setSafeMode((enabled) => !enabled)}
+              aria-pressed={safeMode}
+              title="Launch without mods, resource packs or shaders. Turn it on when Minecraft crashes or misbehaves, so you can tell whether your content is the cause."
+            >
+              <ShieldCheck />
+              <span className="safe-mode__label">Safe Mode</span>
+              <span className="safe-mode__switch" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -537,13 +583,14 @@ export function HomePage() {
                 onClick={() => void launchBedrock(edition.id)}
               >
                 <span className="recent-card__icon">
-                  <Boxes />
+                  <EditionMark edition={bedrockEditionKind(edition.id)} size={18} fallback={<Boxes />} />
                 </span>
                 <span className="recent-card__copy">
                   <span className="recent-card__name">{edition.name}</span>
                   <span className="recent-card__meta">
-                    {edition.version ? `Bedrock ${edition.version}` : 'Store edition'} · Click to launch with your Xbox
-                    profile
+                    {edition.editor
+                      ? `Creator mode · ${edition.version ? `Minecraft ${edition.version}` : 'Included with Minecraft'}`
+                      : `${edition.version ? `Bedrock ${edition.version}` : 'Store edition'} · Click to launch with your Xbox profile`}
                   </span>
                 </span>
                 <ArrowRight className="recent-card__arrow" />
@@ -599,7 +646,7 @@ export function HomePage() {
                   }}
                 >
                   <span className="recent-card__icon">
-                    {isCurrent ? <Gamepad2 /> : <Play />}
+                    {versionIcon(installation, 18)}
                   </span>
                   <span className="recent-card__copy">
                     <span className="recent-card__name">{installation.name}</span>
@@ -618,10 +665,7 @@ export function HomePage() {
       <div className="home-grid">
         <section className="panel home-activity">
           <div className="panel-head">
-            <div>
-              <h2 className="panel-head__title">Recent activity</h2>
-              <p className="panel-head__subtitle">Installations, launches and account changes.</p>
-            </div>
+            <h2 className="panel-head__title">Recent activity</h2>
             <button type="button" className="link-button" onClick={() => navigate('logs')}>
               View logs <ArrowRight />
             </button>
@@ -657,10 +701,7 @@ export function HomePage() {
 
         <section className="panel home-overview">
           <div className="panel-head">
-            <div>
-              <h2 className="panel-head__title">Selected installation</h2>
-              <p className="panel-head__subtitle">Worlds, playtime, and the game folder for this profile.</p>
-            </div>
+            <h2 className="panel-head__title">Selected installation</h2>
             <button type="button" className="icon-btn" onClick={() => navigate('installations')} aria-label="Manage installations">
               <ChevronRight />
             </button>
@@ -687,58 +728,6 @@ export function HomePage() {
         </section>
       </div>
 
-      <div className="quick-tiles">
-        <button type="button" className="quick-tile" onClick={() => navigate('installations')}>
-          <span className="quick-tile__icon"><Layers /></span>
-          <span className="quick-tile__copy">
-            <span className="quick-tile__title">Installations</span>
-            <span className="quick-tile__meta">{installations.length} profile{installations.length === 1 ? '' : 's'} configured</span>
-          </span>
-          <ChevronRight />
-        </button>
-        <button type="button" className="quick-tile" onClick={() => openInstallDialog({ mode: 'create' })}>
-          <span className="quick-tile__icon"><Plus /></span>
-          <span className="quick-tile__copy">
-            <span className="quick-tile__title">New installation</span>
-            <span className="quick-tile__meta">
-              {versions
-                ? `${versions.versions.length.toLocaleString()} Java versions · Bedrock · Horizon`
-                : 'Java, Bedrock or Horizon'}
-            </span>
-          </span>
-          <ChevronRight />
-        </button>
-        <button type="button" className="quick-tile" onClick={() => navigate('settings')}>
-          <span className="quick-tile__icon"><Settings /></span>
-          <span className="quick-tile__copy">
-            <span className="quick-tile__title">Settings</span>
-            <span className="quick-tile__meta">Java, memory, and downloads</span>
-          </span>
-          <ChevronRight />
-        </button>
-        <button
-          type="button"
-          className="quick-tile"
-          disabled={!selectedInstallation}
-          onClick={() => selectedInstallation && void openInstallationFolder(selectedInstallation.id)}
-        >
-          <span className="quick-tile__icon"><FolderOpen /></span>
-          <span className="quick-tile__copy">
-            <span className="quick-tile__title">Game directory</span>
-            <span className="quick-tile__meta">
-              {selectedInstallation ? shortPath(selectedInstallation.gameDir, 32) : 'No installation selected'}
-            </span>
-          </span>
-          <ChevronRight />
-        </button>
-      </div>
-
-      <footer className="home-footer">
-        <span className="home-footer__sep" />
-        <span>{settings?.memory.maxMb ? `${settings.memory.maxMb} MB max memory` : 'Memory not configured'}</span>
-        <span className="home-footer__sep" />
-        <span>{data?.app.platform || 'Windows'} · {data?.system.arch || 'x64'}</span>
-      </footer>
     </div>
   )
 }

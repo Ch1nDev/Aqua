@@ -191,7 +191,7 @@ export async function downloadFiles(files, options = {}) {
   } = options
 
   if (!Array.isArray(files) || files.length === 0) {
-    return { bytes: 0, files: 0 }
+    return { bytes: 0, files: 0, downloadedBytes: 0, downloadedFiles: 0, verifiedFiles: 0 }
   }
 
   const unique = new Map()
@@ -340,6 +340,8 @@ export async function downloadFiles(files, options = {}) {
     bytes: totalBytes,
     files: totalFiles,
     downloadedBytes: networkBytes,
+    downloadedFiles: downloadQueue.length,
+    verifiedFiles: totalFiles - downloadQueue.length,
     elapsedSeconds: Math.max(0.001, (Date.now() - startedAt) / 1000),
   }
 }

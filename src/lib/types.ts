@@ -147,10 +147,15 @@ export interface Settings {
   memory: { minMb: number; maxMb: number }
   defaultGameDir: string
   downloads: { concurrency: number; bandwidthKbps: number }
-  window: { width: number; height: number; fullscreen: boolean }
+  window: {
+    width: number
+    height: number
+    fullscreen: boolean
+    /** Launcher window bounds, restored on the next start. */
+    placement: WindowPlacement
+  }
   jvmArgs: string
   gameArgs: string
-  microsoftClientId: string
   minecraftSettings: { sync: boolean }
   backups: BackupPolicy
   contentFilters: ContentFilters
@@ -173,6 +178,70 @@ export interface Settings {
     refreshJavaOnStart: boolean
   }
   logging: { level: 'debug' | 'info' | 'warn' | 'error'; keepGameLogs: number }
+}
+
+export interface ConfigTransferCounts {
+  added: number
+  skipped: number
+  failed: number
+}
+
+export interface ConfigExportResult {
+  path: string
+  installations: number
+  servers: number
+}
+
+export interface ConfigImportResult {
+  path: string
+  settings: Settings
+  installations: ConfigTransferCounts
+  servers: ConfigTransferCounts
+  warnings: string[]
+  backupPath: string | null
+}
+
+export type ResetCategoryId = 'settings' | 'profiles' | 'servers' | 'history' | 'caches' | 'logs'
+
+export interface ResetCategory {
+  id: ResetCategoryId
+  label: string
+  description: string
+  count: number | null
+  bytes: number
+  files: number
+}
+
+export interface ResetPreview {
+  generatedAt: string
+  token: string
+  confirmationWord: string
+  categories: ResetCategory[]
+  totalBytes: number
+  totalFiles: number
+  accountsPreserved: number
+  preserved: string[]
+  skippedLinks: number
+  truncated: boolean
+  blockedReason: string | null
+  backupPath: string
+}
+
+export interface ResetResult {
+  backupPath: string
+  markerPath: string | null
+  clearedAt: string
+  settings: Settings
+  removed: { bytes: number; files: number }
+  warnings: string[]
+}
+
+export interface WindowPlacement {
+  x: number | null
+  y: number | null
+  width: number
+  height: number
+  maximized: boolean
 }
 
 export interface InstallationModpack {
@@ -221,6 +290,15 @@ export interface Installation {
   isActive: boolean
 }
 
+/** A skin the player picked from the library, stored on their own profile. */
+export interface AccountSkin {
+  id: string
+  slug: string
+  name: string
+  model: 'classic' | 'slim'
+  textureDataUrl: string | null
+}
+
 export interface Account {
   id: string
   type: 'microsoft' | 'offline'
@@ -231,7 +309,24 @@ export interface Account {
   expiresAt: string | null
   sessionExpired: boolean
   avatarDataUrl: string | null
+  skin: AccountSkin | null
   isActive: boolean
+}
+
+export interface SkinSummary {
+  id: string
+  slug: string
+  name: string
+  model: 'classic' | 'slim'
+  pngPath: string
+  textureDataUrl: string | null
+}
+
+export interface SkinCatalog {
+  skins: SkinSummary[]
+  page: number
+  totalPages: number
+  total: number
 }
 
 export interface AccountsState {
@@ -349,7 +444,7 @@ export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancell
 
 export interface DownloadJob {
   id: string
-  type: 'install' | 'java' | 'backup' | 'modpack-import' | 'launcher-import'
+  type: 'install' | 'java' | 'backup' | 'modpack-import' | 'launcher-import' | 'maintenance'
   installationId: string | null
   installationName: string | null
   versionId: string | null
@@ -372,6 +467,38 @@ export interface DownloadJob {
   startedAt: string | null
   finishedAt: string | null
   result?: unknown
+}
+
+export type MaintenanceProfileStatus = 'healthy' | 'repaired' | 'attention' | 'failed'
+
+export interface MaintenanceHealth {
+  status: 'ok' | 'warn' | 'error' | 'unknown'
+  errors: number
+  warnings: number
+}
+
+export interface MaintenanceProfileResult {
+  id: string
+  name: string
+  versionId: string
+  before: MaintenanceHealth
+  after: MaintenanceHealth
+  repaired: { files: number; bytes: number }
+  errors: string[]
+  status: MaintenanceProfileStatus
+}
+
+export interface MaintenanceSummary {
+  profiles: MaintenanceProfileResult[]
+  total: number
+  checked: number
+  healthy: number
+  repaired: number
+  failed: number
+  attention: number
+  cancelled: boolean
+  startedAt: string | null
+  finishedAt: string
 }
 
 export type GameStatus = 'idle' | 'preparing' | 'running' | 'exited' | 'crashed' | 'failed'
@@ -407,6 +534,23 @@ export interface GameState {
     restored?: number
     conflicts?: number
   }
+}
+
+export type LaunchQueueReason = 'game-running' | 'preparing' | 'install' | 'manual'
+
+export interface LaunchQueueEntry {
+  id: string
+  installationId: string
+  installationName: string | null
+  safeMode: boolean
+  requestedAt: string
+  reason: LaunchQueueReason
+}
+
+export interface LaunchQueueSnapshot {
+  entries: LaunchQueueEntry[]
+  paused: boolean
+  reason: string | null
 }
 
 export interface CrashAction {
@@ -455,6 +599,23 @@ export interface HealthResult {
 export interface HealthSummary {
   installations: { installationId: string; status: HealthStatus }[]
   status: HealthStatus
+}
+
+export type PreflightLevel = 'error' | 'warn'
+
+export interface PreflightRow {
+  id: string
+  level: PreflightLevel
+  title: string
+  detail: string
+  action?: { kind: HealthFixKind; label: string }
+}
+
+export interface PreflightResult {
+  installationId: string
+  status: 'ok' | 'warn' | 'error'
+  rows: PreflightRow[]
+  checkedAt: string
 }
 
 export type ContentType = 'mods' | 'resourcepacks' | 'shaderpacks' | 'datapacks'
@@ -656,7 +817,9 @@ export interface LinkStatus {
   examples: LinkExample[]
 }
 
-/** One validated action from `aqua://` or the CLI, handed to the renderer. */
+export type OpenFileType = 'mrpack' | 'mcpack' | 'mcaddon' | 'mcworld'
+
+/** One validated action from `aqua://`, the CLI, or a Windows file association. */
 export type LinkIntent =
   | {
       kind: 'launch'
@@ -690,6 +853,13 @@ export type LinkIntent =
       source: 'link' | 'cli'
       json?: boolean
     }
+  | {
+      kind: 'openFile'
+      path: string
+      fileType: OpenFileType
+      confirmed: boolean
+      source: 'file'
+    }
 
 export interface AppNotification {
   id: string
@@ -720,6 +890,7 @@ export interface Bootstrap {
   sessions: SessionEntry[]
   jobs: DownloadJob[]
   game: GameState
+  launchQueue: LaunchQueueSnapshot
   auth: AuthState
   versions: VersionManifest | null
   system: SystemInfo
@@ -762,6 +933,50 @@ export interface LogReadResult {
   name: string
 }
 
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug'
+
+export interface LogModRef {
+  id: string
+  name: string
+  filename: string | null
+}
+
+export interface LogTailLine {
+  text: string
+  level: LogLevel
+  mod: LogModRef | null
+}
+
+export interface LogTailStart {
+  id: string
+  stopped: false
+  category: 'launcher' | 'game' | 'crash'
+  file: string
+  lines: LogTailLine[]
+  size: number
+  modified: string
+  truncated: boolean
+}
+
+export interface LogTailStopped {
+  id: string | null
+  stopped: true
+}
+
+export type LogTailResult = LogTailStart | LogTailStopped
+
+export interface LogTailEvent {
+  id: string
+  lines: LogTailLine[]
+  size: number
+  modified: string
+  reset?: boolean
+  dropped?: number
+  stopped?: boolean
+  reason?: string
+  error?: string
+}
+
 export interface NotificationPayload {
   level: 'success' | 'error' | 'info' | 'warning'
   title: string
@@ -775,6 +990,8 @@ export type AppEvent =
   | { type: 'activity'; payload: { activity: ActivityEntry[]; sessions: SessionEntry[] } }
   | { type: 'downloads'; payload: { jobs: DownloadJob[] } }
   | { type: 'game'; payload: GameState }
+  | { type: 'launch-queue'; payload: LaunchQueueSnapshot }
+  | { type: 'logs:tail'; payload: LogTailEvent }
   | { type: 'auth'; payload: AuthState }
   | { type: 'notification'; payload: NotificationPayload }
   | { type: 'app:route'; payload: { intent: LinkIntent } }
@@ -850,7 +1067,7 @@ export interface WorldSearchEntry {
 }
 
 /** The three editions that can be installed from the one installation screen. */
-export type InstallEdition = 'java' | 'bedrock' | 'horizon'
+export type InstallEdition = 'java' | 'bedrock' | 'editor' | 'horizon'
 
 export interface InstallDialogState {
   mode: 'create' | 'edit'
@@ -1248,6 +1465,9 @@ export interface BedrockEdition {
   installLocation: string | null
   status: string | null
   appUserModelId: string | null
+  /** True for the Editorial mode of this edition, which opens through a creator URI. */
+  editor?: boolean
+  editorUri?: string | null
   dataRoot: string
   dataRootExists: boolean
   worldsDirectory: string
@@ -1256,6 +1476,8 @@ export interface BedrockEdition {
 export interface BedrockStatus {
   supported: boolean
   editions: BedrockEdition[]
+  /** Package names Windows lists with no files, such as a queued Store download. */
+  stubs?: string[]
   /** Windows Developer Mode, which side-loading a downloaded build needs. */
   developerMode: boolean | null
   storeUrl: string
@@ -1284,6 +1506,8 @@ export interface BedrockLibraryEntry {
   version: string
   directory: string
   layout: 'appx' | 'msixvc'
+  /** Downloaded from the Editor screen, so it is listed as an Editor version. */
+  editor?: boolean
   sizeBytes: number
 }
 
@@ -1364,6 +1588,8 @@ export interface BedrockLaunchResult {
   address?: string
   url?: string
   appUserModelId?: string | null
+  /** True when the launch opened the Editor rather than the game itself. */
+  editor?: boolean
 }
 
 export interface BedrockWorldSummary {

@@ -1,3 +1,5 @@
+import { statSync as defaultStatSync } from 'node:fs'
+import path from 'node:path'
 import { normalizeServerAddress } from './servers.js'
 
 export const LINK_SCHEME = 'aqua'
@@ -20,6 +22,15 @@ const MAX_LINK_LENGTH = 2048
 const MAX_INSTANCE_LENGTH = 128
 const PROJECT_PATTERN = /^[A-Za-z0-9!@$()_.~'-]{1,64}$/
 const COMMANDS = ['launch', 'join', 'install', 'status']
+const MAX_OPEN_FILE_BYTES = 4 * 1024 * 1024 * 1024
+
+/** File types registered by the Windows installer. */
+export const OPEN_FILE_TYPES = Object.freeze({
+  '.mrpack': 'mrpack',
+  '.mcpack': 'mcpack',
+  '.mcaddon': 'mcaddon',
+  '.mcworld': 'mcworld',
+})
 
 export const LINK_EXAMPLES = [
   {
@@ -154,6 +165,32 @@ export function parseAquaLink(value) {
   throw new Error(`Unknown Aqua link action "${action}". Use launch, join, install or open.`)
 }
 
+/**
+ * Validates one locally associated file before it reaches the renderer. This
+ * never scans a folder or follows a second path: the association is exactly one
+ * absolute file that still exists and is a plausible size for its type.
+ */
+export function parseOpenFileIntent(value, { stat = defaultStatSync } = {}) {
+  const filePath = linkText(value, 'File path', 4096)
+  if (!path.isAbsolute(filePath)) throw new Error('The file path must be absolute.')
+  const fileType = OPEN_FILE_TYPES[path.extname(filePath).toLowerCase()]
+  if (!fileType) throw new Error('Aqua can open .mrpack, .mcpack, .mcaddon, or .mcworld files.')
+
+  let info
+  try {
+    info = stat(filePath)
+  } catch {
+    throw new Error(`That file is no longer available: ${path.basename(filePath)}.`)
+  }
+  if (!info || typeof info.isFile !== 'function' || !info.isFile()) {
+    throw new Error('That path is a folder, not a file.')
+  }
+  if (!Number.isFinite(info.size) || info.size <= 0) throw new Error('That file is empty.')
+  if (info.size > MAX_OPEN_FILE_BYTES) throw new Error('That file is too large for Aqua to open.')
+
+  return { kind: 'openFile', path: filePath, fileType, confirmed: false, source: 'file' }
+}
+
 function commandTokens(argv) {
   const args = Array.isArray(argv) ? argv.map((value) => String(value)) : []
   if (args.length <= 1) return []
@@ -205,7 +242,7 @@ function readOptions(tokens, { flags = [], values = [] } = {}) {
 }
 
 /** Parses a CLI invocation. Returns null when Aqua was started normally. */
-export function parseCommandLine(argv) {
+export function parseCommandLine(argv, { stat = defaultStatSync } = {}) {
   const tokens = commandTokens(argv)
   if (!tokens.length) return null
 
@@ -218,6 +255,17 @@ export function parseCommandLine(argv) {
       source: 'cli',
       ...(tokens.includes('--json') ? { json: true } : {}),
     }
+  }
+
+  const first = tokens[0]
+  const looksLikePath =
+    path.isAbsolute(first) ||
+    /^[A-Za-z]:[\\/]/.test(first) ||
+    /[\\/]/.test(first) ||
+    Boolean(OPEN_FILE_TYPES[path.extname(first).toLowerCase()])
+  if (looksLikePath) {
+    if (tokens.length !== 1) throw new Error('Open one associated file at a time.')
+    return parseOpenFileIntent(first, { stat })
   }
 
   const [command, ...rest] = tokens

@@ -306,7 +306,7 @@ export class Installer {
       bytes: totalBytes,
     })
 
-    await downloadFiles(uniqueFiles, {
+    const fileResult = await downloadFiles(uniqueFiles, {
       concurrency: settings.downloads.concurrency,
       bandwidthKbps: settings.downloads.bandwidthKbps,
       signal,
@@ -402,6 +402,9 @@ export class Installer {
       assetIndexPath,
       bytes: totalBytes,
       files: uniqueFiles.length,
+      downloadedFiles: fileResult.downloadedFiles,
+      verifiedFiles: fileResult.verifiedFiles,
+      downloadedBytes: fileResult.downloadedBytes,
     }
   }
 

@@ -28,6 +28,13 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 - **Minecraft installation pipeline** that resolves inheritance, libraries, natives, assets, and logging configuration, with integrity-checked downloads, verification, and repair. Interrupted installs reuse already-verified files.
 - **Mod updates** via Modrinth's hash lookup: check all installed content at once, update individual files, or update everything, while preserving disabled files.
 - **Launching** with Java detection, Mojang runtime downloads, per-installation memory, JVM and game arguments, custom resolution, and process tracking.
+- **Pre-launch checklist** that blocks a missing client jar, a failing install, a 32-bit or incompatible Java runtime, invalid memory, or less than 2 GB free space, and offers the safe fix in the same sheet. Warning-only issues can be dismissed for the session; a healthy profile launches with no extra click.
+- **Launch queue** that turns a second Play while an install, launch, or game is in flight into one queued session, advances only after a clean exit, and pauses with a retry action after a crash.
+- **Live log tail** that follows a launcher or game log from a byte offset, attributes frames to installed mods, filters by level or mod, and jumps to the first error or warning without reading the whole file again.
+- **Verify-all maintenance** that checks every installed profile newest-first in one cancellable pass, repairs missing or damaged game files through the existing installer, keeps one broken profile from stopping the batch, and reports each profile's before/after health and repaired files in Settings → Troubleshooting.
+- **Windows file associations and jump list**: double-clicking a `.mrpack`, `.mcpack`, `.mcaddon` or `.mcworld` opens Aqua's confirmation sheet instead of importing silently, and the taskbar jump list offers the five most recent installed profiles plus the last saved server.
+- **Portable configuration transfer** in Settings → Transfer: export settings, themes, profile metadata and saved servers as one JSON file, then add them on another PC. Accounts, tokens, worlds, mods and game files are never included; imports only add missing profiles and servers, preserve machine-specific paths and window placement, and save a backup of the current configuration first.
+- **Safe factory reset** in Settings → Reset: preview every category and reclaimable size, export first if you want, then type `RESET`. Accounts and encrypted tokens stay signed in, while worlds, mods, backups, exported files and game folders are never touched. Only launcher-owned caches and logs are cleared; a pre-reset config backup and reset marker are written first.
 - **Diagnostics** with the launcher log, per-session game logs, crash reports, filtering, search, copy, open-folder, and export actions.
 - **Settings** for interface scale (80–130%), reduce motion, the ambient dashboard scene, Java runtime, memory, shared Minecraft settings, game directory, download concurrency and speed limits, storage cleanup, window mode, arguments, startup behavior, Discord presence, and logging.
 - **Tasks** page that collects every background job — game downloads, Java runtimes, Horizon installs and native builds, Bedrock packages, storage scans, and launch preparation — with live progress, speed, size, time remaining, cancel, retry, and clear-finished actions.
@@ -81,7 +88,9 @@ aqua status --json
 
 Links and commands are untrusted input: Aqua asks before launching, joining or installing anything. Add `--yes` in CLI scripts to accept the action. A command sent while Aqua is already running is forwarded to that window instead of starting a second copy. `aqua status --json` reports profile names, versions, loaders, pin state and tags only — never tokens, accounts or file paths.
 
-On Windows the protocol is registered per user. Uninstalling removes the app; if Windows keeps a stale `aqua://` entry, clear it under **Settings → Apps → Default apps**, or reinstall Aqua to repair it.
+On Windows the installer also associates `.mrpack`, `.mcpack`, `.mcaddon` and `.mcworld` files. Double-clicking one opens Aqua's confirmation sheet first; a pack is inspected before a new profile is created, and Bedrock packs and worlds are imported only after you confirm. The original file is never moved or changed. Only one existing absolute file is accepted at a time, and Aqua rejects unknown extensions, folders, empty files and oversized archives.
+
+On Windows the protocol and file associations are registered per user. Uninstalling removes the app; if Windows keeps a stale `aqua://` or file-association entry, clear it under **Settings → Apps → Default apps**, or reinstall Aqua to repair it. The taskbar jump list offers the five most recent installed profiles and the last server; those items reuse the same `aqua://` launch and join confirmation flow.
 
 ## Discord Rich Presence
 
@@ -93,14 +102,12 @@ A copy built from source needs its own Discord application: create one at the [D
 
 ## Accounts
 
-Aqua supports two account types. **Microsoft sign-in is currently hidden in the UI** while the Azure application is pending Mojang approval, so the app ships with offline profiles only.
+Aqua supports two account types.
 
 1. **Offline profile** — enter a username and play singleplayer, LAN worlds, or modded setups. A deterministic UUID is generated locally. Offline profiles cannot join online-mode servers.
-2. **Microsoft** — uses the official OAuth authorization-code flow with PKCE and a local loopback callback, plus your own Azure application (client) ID. Microsoft requires third-party launchers to be approved for Minecraft API access by Mojang. If your application is not approved, sign-in fails with an explanatory error.
+2. **Microsoft** — uses the official OAuth authorization-code flow with PKCE and a local loopback callback. Sign in with the account that owns Minecraft: Java Edition; Aqua loads your player name and skin and stores only an encrypted refresh token with your operating system.
 
-The backend is intact; only the UI entry points are gated. To bring Microsoft sign-in back once the application is approved, set `MICROSOFT_AUTH_ENABLED = true` in [`src/lib/features.ts`](src/lib/features.ts) — no other changes are needed.
-
-Once enabled: open **Account → Connect Microsoft**, paste the Application (client) ID from the Azure portal, and complete the browser sign-in. The ID is stored in the launcher settings. Tokens never touch `localStorage` or the renderer process.
+The launcher's own approved Azure application credentials are read by the main process from `private/microsoft.json` (`{"clientId": "…", "clientSecret": "…"}`, the secret being optional) or from the directory named by `AQUA_PRIVATE_DIR`. That file is git-ignored and never reaches the renderer, so **Account → Connect Microsoft** starts the browser sign-in immediately and there is nothing to configure in the UI. Tokens never touch `localStorage` or the renderer process.
 
 ## Extra content
 
@@ -259,13 +266,15 @@ Inside that folder:
 
 Pass `--portable` or put an empty `portable.txt` next to `Aqua Launcher.exe` to keep everything beside the executable instead of in AppData. Aqua creates `AquaData/` there and points its data, session data, Electron logs, crash dumps and default downloads at it before the single-instance lock is taken. The About page shows the active data folder and a **Portable** badge.
 
-Portable mode never registers the `aqua://` protocol or a login-at-startup entry, so Windows gets no registry writes from the launcher. If the folder is read-only, Aqua shows a clear error and starts with the normal AppData location instead of crashing. Updates are manual: replace the folder when a new build is ready. A drive that disappears while Aqua is running can still interrupt a write, but settings and profile saves use same-folder temporary files and atomic renames, so the previous config remains readable on the next launch.
+Portable mode never registers the `aqua://` protocol, file associations or a login-at-startup entry, so Windows gets no registry writes from the launcher. If the folder is read-only, Aqua shows a clear error and starts with the normal AppData location instead of crashing. Updates are manual: replace the folder when a new build is ready. A drive that disappears while Aqua is running can still interrupt a write, but settings and profile saves use same-folder temporary files and atomic renames, so the previous config remains readable on the next launch.
 
 Custom game directories are validated against drive roots and protected system locations such as `C:\Windows` and `Program Files`.
 
 ## Accessibility
 
-Aqua is keyboard-operable from the titlebar to every page: use `Tab`/`Shift+Tab` to move, `Enter` or `Space` to activate, and `Escape` to close dialogs, drawers and the command palette. A **Skip to content** link appears on keyboard focus, `Ctrl+K` opens search, and dialogs return focus to the control that opened them. Page changes and completed background jobs are announced through polite live regions, and toasts use the same pattern.
+Aqua is keyboard-operable from the titlebar to every page: use `Tab`/`Shift+Tab` to move, `Enter` or `Space` to activate, and `Escape` to close dialogs, drawers and the command palette. A **Skip to content** link appears on keyboard focus, `Ctrl+K` opens search, and dialogs return focus to the control that opened them. `Ctrl+Enter` launches the current Play target, `Alt+1…9` jump through the sidebar, and `Ctrl+,` opens Settings; press `?` anywhere outside a text field for the full focus-trapped cheat sheet. Page changes and completed background jobs are announced through polite live regions, and toasts use the same pattern.
+
+The launcher also restores its own window position, size and maximized state on the next start, clamped to a visible display so a disconnected monitor cannot leave the window off-screen.
 
 **Settings → Display** adds **High contrast**, **Reduce transparency** and **Reduce motion**. High contrast switches to an opaque black palette with stronger text and borders; reduce transparency removes frosted chrome; reduce motion stops CSS animations and transitions, and Aqua also honours the operating system's `prefers-reduced-motion` setting. Icon-only controls have labels, and primary controls use at least 32×32 px hit targets with visible focus rings.
 

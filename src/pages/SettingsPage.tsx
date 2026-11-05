@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Archive,
+  ArrowLeftRight,
   ArrowUpRight,
   Bell,
   Check,
@@ -30,13 +31,13 @@ import {
   Wrench,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
-import { MICROSOFT_AUTH_ENABLED } from '../lib/features'
 import { formatBytes, formatDateTime, relativeTime } from '../lib/format'
 import { javaPurpose } from '../lib/java-info'
 import { useLauncher } from '../state/LauncherProvider'
 import type {
   BackupStatus,
   JavaRuntimeOption,
+  MaintenanceSummary,
   MinecraftSettingsStatus,
   Settings,
   SystemInfo,
@@ -44,6 +45,8 @@ import type {
 import { PageHeader } from '../components/layout/PageHeader'
 import { StoragePanel } from '../components/settings/StoragePanel'
 import { LinksPanel } from '../components/settings/LinksPanel'
+import { ResetPanel } from '../components/settings/ResetPanel'
+import { TransferPanel } from '../components/settings/TransferPanel'
 import {
   Badge,
   Button,
@@ -65,6 +68,8 @@ const SECTIONS = [
   { id: 'settings-discord', label: 'Discord presence', icon: MessageCircle },
   { id: 'settings-game', label: 'Game & downloads', icon: HardDrive },
   { id: 'settings-storage', label: 'Storage', icon: Database },
+  { id: 'settings-transfer', label: 'Transfer', icon: ArrowLeftRight },
+  { id: 'settings-reset', label: 'Reset', icon: RotateCcw },
   { id: 'settings-window', label: 'Window', icon: Monitor },
   { id: 'settings-advanced', label: 'Advanced', icon: SlidersHorizontal },
   { id: 'settings-startup', label: 'Startup', icon: Power },
@@ -94,6 +99,158 @@ function JavaPurpose({ major }: { major: number }) {
         {purpose}
       </span>
     </span>
+  )
+}
+
+const MAINTENANCE_LABEL: Record<MaintenanceSummary['profiles'][number]['status'], string> = {
+  healthy: 'Healthy',
+  repaired: 'Repaired',
+  attention: 'Needs attention',
+  failed: 'Failed',
+}
+
+function maintenanceTone(status: MaintenanceSummary['profiles'][number]['status']) {
+  if (status === 'healthy') return 'success' as const
+  if (status === 'repaired') return 'info' as const
+  if (status === 'attention') return 'warning' as const
+  return 'danger' as const
+}
+
+/** One-click verification for every installed profile, without opening each Health dialog. */
+function MaintenancePanel() {
+  const { jobs, pushToast } = useLauncher()
+  const [starting, setStarting] = useState(false)
+  const job = jobs.find((entry) => entry.type === 'maintenance')
+  const summary = job?.result as MaintenanceSummary | null | undefined
+  const running = job?.status === 'queued' || job?.status === 'running'
+
+  const start = async () => {
+    setStarting(true)
+    try {
+      await api.maintenance.verifyAll()
+    } catch (error) {
+      pushToast({
+        level: 'error',
+        title: 'Could not start verification',
+        message: getErrorMessage(error),
+      })
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  const cancel = async () => {
+    try {
+      await api.maintenance.cancel()
+    } catch (error) {
+      pushToast({
+        level: 'error',
+        title: 'Could not cancel verification',
+        message: getErrorMessage(error),
+      })
+    }
+  }
+
+  return (
+    <div className="maintenance-panel">
+      <div className="maintenance-panel__head">
+        <div className="maintenance-panel__title">
+          <span className="maintenance-panel__mark">
+            <ShieldCheck />
+          </span>
+          <div>
+            <strong>Verify all installations</strong>
+            <span>
+              Check every installed profile in one pass and repair missing or damaged game files it can.
+            </span>
+          </div>
+        </div>
+        <div className="maintenance-panel__actions">
+          {running ? (
+            <Button size="sm" variant="ghost" onClick={() => void cancel()}>
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<RefreshCw />}
+              loading={starting}
+              onClick={() => void start()}
+            >
+              Verify all
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {job ? (
+        <div className="maintenance-panel__status">
+          <div className="maintenance-panel__meta">
+            <span>{job.stage}</span>
+            <span>
+              {job.filesTotal ? `${job.filesDone ?? 0} of ${job.filesTotal} profiles` : 'Preparing'}
+            </span>
+          </div>
+          <div
+            className={cx('maintenance-panel__bar', job.status === 'running' && job.progress == null && 'is-indeterminate')}
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={job.progress == null ? undefined : Math.round(job.progress)}
+          >
+            <span style={{ width: `${job.progress == null ? 35 : Math.max(0, Math.min(100, job.progress))}%` }} />
+          </div>
+          {job.status === 'failed' && job.error ? (
+            <div className="maintenance-panel__error">{job.error}</div>
+          ) : null}
+        </div>
+      ) : (
+        <p className="maintenance-panel__hint">
+          Worlds, mods and backups are never changed. The current profile is allowed to finish when you cancel.
+        </p>
+      )}
+
+      {summary ? (
+        <div className="maintenance-panel__summary">
+          <div className="maintenance-panel__counts">
+            <span>
+              <strong>{summary.checked}</strong> of {summary.total} checked
+            </span>
+            <span className="is-good">{summary.healthy} healthy</span>
+            <span>{summary.repaired} repaired</span>
+            {summary.attention ? <span className="is-warn">{summary.attention} need attention</span> : null}
+            {summary.failed ? <span className="is-bad">{summary.failed} failed</span> : null}
+            {summary.cancelled ? <Badge tone="warning">Cancelled early</Badge> : null}
+          </div>
+          <div className="maintenance-panel__rows">
+            {summary.profiles.map((profile) => (
+              <div className="maintenance-panel__row" key={profile.id}>
+                <div className="maintenance-panel__profile">
+                  <strong>{profile.name}</strong>
+                  <span>
+                    {profile.versionId} · {profile.before.status} → {profile.after.status}
+                  </span>
+                </div>
+                <div className="maintenance-panel__repair">
+                  {profile.repaired.files > 0
+                    ? `${profile.repaired.files} file${profile.repaired.files === 1 ? '' : 's'} · ${formatBytes(profile.repaired.bytes)}`
+                    : 'No files needed repair'}
+                </div>
+                <Badge tone={maintenanceTone(profile.status)}>{MAINTENANCE_LABEL[profile.status]}</Badge>
+                {profile.errors.length ? (
+                  <div className="maintenance-panel__error">{profile.errors.join(' ')}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {summary.checked === 0 ? (
+            <p className="maintenance-panel__hint">No installed profiles are available to check.</p>
+          ) : null}
+          <p className="maintenance-panel__stamp">Last run {relativeTime(summary.finishedAt)}</p>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -441,7 +598,6 @@ function SettingsWorkspace({
     <div className="page page--settings">
       <PageHeader
         title="Settings"
-        subtitle="Java, memory, downloads, and window behavior. Changes are saved on this device."
         actions={
           <Button
             icon={<FolderOpen />}
@@ -482,7 +638,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-appearance">
             <div className="settings-section__head">
               <h2>Display</h2>
-              <p>Text size, motion, and the dashboard illustration.</p>
             </div>
             <div className="settings-card">
               <div className="settings-field-block">
@@ -553,7 +708,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-java">
             <div className="settings-section__head">
               <h2>Java runtime</h2>
-              <p>Minecraft runs on Java. Automatic selection finds the best installed runtime for each version.</p>
             </div>
             <div className="settings-card">
               <div className="settings-card__toolbar">
@@ -718,7 +872,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-memory">
             <div className="settings-section__head">
               <h2>Memory</h2>
-              <p>Allocate RAM to Minecraft. Leave a few gigabytes free for Windows and other apps.</p>
             </div>
             <div className="settings-card">
               <div className="memory-hero">
@@ -804,10 +957,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-minecraft">
             <div className="settings-section__head">
               <h2>Minecraft settings</h2>
-              <p>
-                Keep video, audio, control and server-list settings identical across installations. Mod config files,
-                worlds and saves are never touched.
-              </p>
             </div>
             <div className="settings-card">
               <FieldRow
@@ -860,21 +1009,12 @@ function SettingsWorkspace({
                   </Button>
                 </div>
               </FieldRow>
-              {minecraftStatus?.directory ? (
-                <p className="settings-hint">
-                  Shared settings are stored in {minecraftStatus.directory} and copied into each installation's game
-                  folder.
-                </p>
-              ) : null}
             </div>
           </section>
 
           <section className="settings-section" id="settings-backups">
             <div className="settings-section__head">
               <h2>World backups</h2>
-              <p>
-                Automatic ZIP copies of changed worlds. Restoring always adds a copy, so a live save is never replaced.
-              </p>
             </div>
             <div className="settings-card">
               <FieldRow
@@ -967,16 +1107,12 @@ function SettingsWorkspace({
                   Run now
                 </Button>
               </FieldRow>
-              <p className="settings-hint">
-                Save changes before running. Backups run as a cancellable task, and retention is applied after every run.
-              </p>
             </div>
           </section>
 
           <section className="settings-section" id="settings-notifications">
             <div className="settings-section__head">
               <h2>Notifications</h2>
-              <p>Keep launcher events in the titlebar bell and choose when Windows should interrupt you.</p>
             </div>
             <div className="settings-card">
               <FieldRow
@@ -1047,7 +1183,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-discord">
             <div className="settings-section__head">
               <h2>Discord presence</h2>
-              <p>Show the active Java profile on your Discord profile while you play. Off by default.</p>
             </div>
             <div className="settings-card">
               <FieldRow
@@ -1082,7 +1217,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-game">
             <div className="settings-section__head">
               <h2>Game & downloads</h2>
-              <p>Choose where new profiles store data and how much bandwidth Aqua may use.</p>
             </div>
             <div className="settings-card">
               <Field
@@ -1167,17 +1301,33 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-storage">
             <div className="settings-section__head">
               <h2>Storage</h2>
-              <p>Where the space went, and what can be safely reclaimed without touching a world or a mod.</p>
             </div>
             <div className="settings-card">
               <StoragePanel />
             </div>
           </section>
 
+          <section className="settings-section" id="settings-transfer">
+            <div className="settings-section__head">
+              <h2>Transfer</h2>
+            </div>
+            <div className="settings-card">
+              <TransferPanel />
+            </div>
+          </section>
+
+          <section className="settings-section" id="settings-reset">
+            <div className="settings-section__head">
+              <h2>Reset</h2>
+            </div>
+            <div className="settings-card">
+              <ResetPanel />
+            </div>
+          </section>
+
           <section className="settings-section" id="settings-window">
             <div className="settings-section__head">
               <h2>Game window</h2>
-              <p>Default resolution for installations that don’t override it.</p>
             </div>
             <div className="settings-card">
               <div className="window-preset-row">
@@ -1234,7 +1384,8 @@ function SettingsWorkspace({
               </div>
               <p className="settings-hint">
                 Per-installation overrides take precedence over these defaults. Window size is passed directly to
-                Minecraft; fullscreen is applied to the profile’s options file before launch.
+                Minecraft; fullscreen is applied to the profile’s options file before launch. The launcher remembers
+                its own window position, size and maximized state, and keeps it on a visible display.
               </p>
             </div>
           </section>
@@ -1242,11 +1393,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-advanced">
             <div className="settings-section__head">
               <h2>Advanced</h2>
-              <p>
-                {MICROSOFT_AUTH_ENABLED
-                  ? 'Arguments and Microsoft sign-in configuration. Change these only if you know the impact.'
-                  : 'JVM and game arguments. Change these only if you know the impact.'}
-              </p>
             </div>
             <div className="settings-card">
               <div className="settings-inline-grid settings-inline-grid--equal">
@@ -1273,59 +1419,12 @@ function SettingsWorkspace({
                 </Field>
               </div>
 
-              {MICROSOFT_AUTH_ENABLED ? (
-                <>
-                  <div className="settings-divider" />
-
-                  <div className="settings-card__toolbar">
-                    <div>
-                      <span className="section-kicker">Microsoft sign-in</span>
-                      <p className="settings-muted">Your Azure application (client) ID. Required for account sign-in.</p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<ExternalLink />}
-                      onClick={() =>
-                        void api.openExternal(
-                          'https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app',
-                        )
-                      }
-                    >
-                      Azure guide
-                    </Button>
-                  </div>
-                  <Field
-                    label="Application (client) ID"
-                    hint="Register a desktop app with http://localhost as a mobile/desktop redirect. This is public metadata."
-                  >
-                    <input
-                      className="input input--mono"
-                      value={form.microsoftClientId}
-                      onChange={(event) => update('microsoftClientId', event.target.value)}
-                      placeholder="00000000-0000-0000-0000-000000000000"
-                      spellCheck={false}
-                    />
-                  </Field>
-                  {form.microsoftClientId && form.microsoftClientId !== settings.microsoftClientId && launcher.accounts?.accounts.length ? (
-                    <div className="callout callout--warning">
-                      <TriangleAlert />
-                      Changing the app ID invalidates existing sign-in sessions. You may need to sign in again.
-                    </div>
-                  ) : null}
-                  <p className="settings-hint">
-                    Aqua uses the OAuth 2.0 authorization code flow with PKCE and a loopback callback. Microsoft requires
-                    third-party apps to be approved for Minecraft services before the final token exchange succeeds.
-                  </p>
-                </>
-              ) : null}
             </div>
           </section>
 
           <section className="settings-section" id="settings-startup">
             <div className="settings-section__head">
               <h2>Startup</h2>
-              <p>How Aqua behaves when Windows starts and when a game session ends.</p>
             </div>
             <div className="settings-card">
               <FieldRow
@@ -1382,7 +1481,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-troubleshooting">
             <div className="settings-section__head">
               <h2>Logging & troubleshooting</h2>
-              <p>Control log detail and get a diagnostic bundle when something goes wrong.</p>
             </div>
             <div className="settings-card">
               <div className="settings-inline-grid">
@@ -1492,13 +1590,15 @@ function SettingsWorkspace({
                   </div>
                 </div>
               </div>
+
+              <div className="settings-divider" />
+              <MaintenancePanel />
             </div>
           </section>
 
           <section className="settings-section" id="settings-links">
             <div className="settings-section__head">
               <h2>Links & CLI</h2>
-              <p>Open Aqua from a browser, Discord, a shortcut or a script without hunting for the window.</p>
             </div>
             <div className="settings-card">
               <LinksPanel />
@@ -1508,7 +1608,6 @@ function SettingsWorkspace({
           <section className="settings-section" id="settings-about">
             <div className="settings-section__head">
               <h2>About</h2>
-              <p>Version information for this installation.</p>
             </div>
             <div className="settings-card about-card">
               <div className="about-card__mark">

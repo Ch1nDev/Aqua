@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import {
   Archive,
   Boxes,
+  Clock,
   Coffee,
   Database,
   Download,
@@ -10,12 +11,14 @@ import {
   Hammer,
   HardDrive,
   Layers,
+  Play,
   RefreshCw,
+  ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
-import { formatBytes, formatEta, formatSpeed } from '../lib/format'
+import { formatBytes, formatEta, formatSpeed, relativeTime } from '../lib/format'
 import { useNow } from '../lib/hooks'
 import { useLauncher } from '../state/LauncherProvider'
 import type {
@@ -23,6 +26,7 @@ import type {
   DownloadJob,
   HorizonInstallJob,
   HorizonNativeJob,
+  LaunchQueueEntry,
 } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Badge, Button, EmptyState, IconButton, ProgressBar, cx } from '../components/ui/primitives'
@@ -34,6 +38,7 @@ type TaskKind =
   | 'backup'
   | 'modpack-import'
   | 'launcher-import'
+  | 'maintenance'
   | 'horizon'
   | 'native'
   | 'bedrock'
@@ -68,6 +73,7 @@ const KIND_ICON: Record<TaskKind, typeof Download> = {
   backup: Archive,
   'modpack-import': Boxes,
   'launcher-import': Boxes,
+  maintenance: ShieldCheck,
   horizon: HardDrive,
   native: Hammer,
   bedrock: Layers,
@@ -112,12 +118,16 @@ export function TasksPage() {
   const {
     jobs,
     game,
+    launchQueue,
     bedrockDownloads,
     storageProgress,
     horizonInstallJob,
     horizonNativeJob,
     installGame,
     openInstallationFolder,
+    dequeueLaunch,
+    launchQueued,
+    resumeLaunchQueue,
     cancelBedrockVersion,
     pushToast,
     navigate,
@@ -148,7 +158,9 @@ export function TasksPage() {
                 ? 'modpack-import'
                 : job.type === 'launcher-import'
                   ? 'launcher-import'
-                  : 'install',
+                  : job.type === 'maintenance'
+                    ? 'maintenance'
+                    : 'install',
         title: job.title,
         subtitle: job.subtitle,
         state: job.status,
@@ -315,7 +327,8 @@ export function TasksPage() {
 
   const active = tasks.filter((task) => task.state === 'running' || task.state === 'queued')
   const finished = tasks.filter((task) => task.state !== 'running' && task.state !== 'queued')
-  useNow(active.length > 0)
+  const launchBusy = game.status === 'preparing' || game.status === 'running'
+  useNow(active.length > 0 || launchQueue.entries.length > 0)
 
   const clearFinished = async () => {
     try {
@@ -329,15 +342,13 @@ export function TasksPage() {
     (job) => job.status !== 'running' && job.status !== 'queued',
   )
 
-  const subtitle = active.length
-    ? `${active.length} task${active.length === 1 ? '' : 's'} running · downloads, builds, and file work all land here`
-    : 'Every download, Horizon build, and other long launcher task appears here with live progress.'
+  const subtitle = active.length ? `${active.length} task${active.length === 1 ? '' : 's'} running` : undefined
 
   return (
     <div className="page">
       <PageHeader
-        title="Tasks"
-        subtitle={subtitle}
+        title="Tasks"            {...(subtitle ? { subtitle } : {})}
+
         actions={
           <Button
             icon={<Trash2 />}
@@ -350,6 +361,37 @@ export function TasksPage() {
           </Button>
         }
       />
+
+      {launchQueue.entries.length > 0 || launchQueue.paused ? (
+        <section className="tasks-section">
+          <div className="tasks-section__head">
+            <h2 className="download-section__title">Launch queue</h2>
+            <span className="text-dim" role="status" aria-live="polite">
+              {launchQueue.entries.length} waiting
+            </span>
+          </div>
+          {launchQueue.paused ? (
+            <div className="launch-queue__notice" role="status">
+              <Clock />
+              <span>{launchQueue.reason || 'The launch queue is paused.'}</span>
+              <Button size="sm" variant="ghost" onClick={() => void resumeLaunchQueue()}>
+                Retry queue
+              </Button>
+            </div>
+          ) : null}
+          <div className="launch-queue">
+            {launchQueue.entries.map((entry) => (
+              <QueueRow
+                key={entry.id}
+                entry={entry}
+                busy={launchBusy}
+                onLaunch={() => void launchQueued(entry)}
+                onRemove={() => void dequeueLaunch(entry.id)}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {active.length > 0 ? (
         <section className="tasks-section">
@@ -384,12 +426,12 @@ export function TasksPage() {
         </section>
       ) : null}
 
-      {active.length === 0 && finished.length === 0 ? (
+      {active.length === 0 && finished.length === 0 && launchQueue.entries.length === 0 && !launchQueue.paused ? (
         <div className="panel tasks-empty">
           <EmptyState
             icon={<Download />}
             title="Nothing is running"
-            description="Installing a version, Horizon's client, a native build, a Bedrock build, or an official Java runtime all show up here with speed, size, and time remaining."
+            description="Downloads, builds and other long-running work appear here with live progress."
           >
             <Button size="sm" icon={<Layers />} onClick={() => navigate('installations')}>
               Browse installations
@@ -398,6 +440,57 @@ export function TasksPage() {
         </div>
       ) : null}
     </div>
+  )
+}
+
+function queueReasonLabel(reason: LaunchQueueEntry['reason']) {
+  switch (reason) {
+    case 'game-running':
+      return 'Waiting for the running game'
+    case 'preparing':
+      return 'Waiting for the current launch'
+    case 'install':
+      return 'Waiting for the install to finish'
+    default:
+      return 'Queued manually'
+  }
+}
+
+function QueueRow({
+  entry,
+  busy,
+  onLaunch,
+  onRemove,
+}: {
+  entry: LaunchQueueEntry
+  busy: boolean
+  onLaunch: () => void
+  onRemove: () => void
+}) {
+  const name = entry.installationName || 'Installation'
+  return (
+    <article className="launch-queue__row">
+      <span className="launch-queue__icon">
+        <Clock />
+      </span>
+      <div className="launch-queue__copy">
+        <strong>{name}</strong>
+        <span>
+          {queueReasonLabel(entry.reason)}
+          {entry.safeMode ? ' · Safe Mode' : ''}
+          {' · queued '}
+          {relativeTime(entry.requestedAt)}
+        </span>
+      </div>
+      <div className="download-card__actions">
+        <Button size="sm" icon={<Play />} onClick={onLaunch} disabled={busy}>
+          Launch now
+        </Button>
+        <IconButton label={`Remove ${name} from the launch queue`} size="sm" onClick={onRemove}>
+          <X />
+        </IconButton>
+      </div>
+    </article>
   )
 }
 

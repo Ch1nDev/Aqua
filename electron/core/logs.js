@@ -115,20 +115,27 @@ export class LogService {
     }
   }
 
-  async read({ category, file, installationId }) {
+  resolve({ category, file, installationId }) {
     if (!file || typeof file !== 'string') throw new Error('Choose a log file.')
     if (category === 'launcher') {
       const fileName = path.basename(file)
       const filePath = path.join(this.paths.logsRoot, fileName)
       if (!isPathInside(filePath, this.paths.logsRoot)) throw new Error('Invalid log file.')
-      return readTail(filePath)
+      return { filePath, category, file: fileName, installationId: null, installation: null }
     }
     if (category === 'game') {
       const safeInstallationId = safeSegment(installationId, 'Installation ID')
       const fileName = path.basename(file)
       const filePath = path.join(this.paths.gameLogsRoot, safeInstallationId, fileName)
       if (!isPathInside(filePath, this.paths.gameLogsRoot)) throw new Error('Invalid game log file.')
-      return readTail(filePath)
+      const installation = this.store.getInstallation(safeInstallationId) || null
+      return {
+        filePath,
+        category,
+        file: fileName,
+        installationId: safeInstallationId,
+        installation,
+      }
     }
     if (category === 'crash') {
       const installation = this.store.getInstallation(installationId)
@@ -137,9 +144,19 @@ export class LogService {
       const crashDir = path.join(installation.gameDir, 'crash-reports')
       const filePath = path.join(crashDir, fileName)
       if (!isPathInside(filePath, crashDir)) throw new Error('Invalid crash report.')
-      return readTail(filePath)
+      return {
+        filePath,
+        category,
+        file: fileName,
+        installationId: installation.id,
+        installation,
+      }
     }
     throw new Error('Unknown log category.')
+  }
+
+  async read({ category, file, installationId }) {
+    return readTail(this.resolve({ category, file, installationId }).filePath)
   }
 
   async openFolder({ category, installationId } = {}) {

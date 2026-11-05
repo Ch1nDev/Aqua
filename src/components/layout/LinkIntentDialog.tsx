@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Gamepad2, Server, TriangleAlert } from 'lucide-react'
+import { Download, FileArchive, Gamepad2, Server, TriangleAlert } from 'lucide-react'
 import { api, getErrorMessage } from '../../lib/api'
 import { useLauncher } from '../../state/LauncherProvider'
 import type { Installation, LinkIntent } from '../../lib/types'
@@ -16,6 +16,21 @@ function findInstallation(installations: Installation[], value: string | null) {
   )
 }
 
+function fileName(value: string) {
+  return value.split(/[\\/]/).pop() || value
+}
+
+function fileTypeLabel(intent: Extract<LinkIntent, { kind: 'openFile' }>) {
+  switch (intent.fileType) {
+    case 'mrpack':
+      return 'Modrinth modpack'
+    case 'mcworld':
+      return 'Bedrock world'
+    default:
+      return 'Bedrock add-on'
+  }
+}
+
 function intentTitle(intent: LinkIntent) {
   switch (intent.kind) {
     case 'launch':
@@ -24,6 +39,8 @@ function intentTitle(intent: LinkIntent) {
       return 'Join a server?'
     case 'install':
       return 'Install a modpack?'
+    case 'openFile':
+      return 'Open this file?'
     default:
       return 'Open Aqua?'
   }
@@ -40,6 +57,7 @@ export function LinkIntentDialog() {
     joinServer,
     refreshInstallations,
     pushToast,
+    bedrock,
   } = useLauncher()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -93,6 +111,40 @@ export function LinkIntentDialog() {
             message: `${result.installation.name} was created from the link.`,
           })
           navigate('installations')
+        } else if (intent.kind === 'openFile') {
+          if (intent.fileType === 'mrpack') {
+            const info = await api.mods.inspectPack(intent.path)
+            await api.mods.importPack(info.path, 'copy')
+            await refreshInstallations()
+            pushToast({
+              level: 'info',
+              title: `Importing ${info.name}`,
+              message: 'Track progress in Tasks. The source .mrpack is left untouched.',
+            })
+            navigate('installations')
+          } else {
+            const editionId = bedrock?.editions?.[0]?.id
+            if (!editionId) {
+              throw new Error('No Minecraft for Windows installation was found. Install Bedrock Edition first.')
+            }
+            const result = await api.bedrock.importAddon(editionId, intent.path)
+            if (result.installed.length) {
+              pushToast({
+                level: 'success',
+                title: `Imported ${result.installed.map((pack) => pack.name).join(', ')}`,
+                message: 'Enable it per world under Settings → Add-Ons in Minecraft.',
+              })
+            } else if (result.worlds.length) {
+              pushToast({
+                level: 'success',
+                title: 'Imported a Bedrock world',
+                message: `The world is in ${result.worlds.join(', ')}.`,
+              })
+              navigate('worlds')
+            } else {
+              throw new Error(result.skipped[0] || 'That file did not contain a Bedrock pack or world.')
+            }
+          }
         }
         dismissLinkIntent()
       } catch (cause) {
@@ -101,7 +153,17 @@ export function LinkIntentDialog() {
         setBusy(false)
       }
     },
-    [dismissLinkIntent, installations, joinServer, navigate, play, pushToast, refreshInstallations, selectedInstallation],
+    [
+      bedrock,
+      dismissLinkIntent,
+      installations,
+      joinServer,
+      navigate,
+      play,
+      pushToast,
+      refreshInstallations,
+      selectedInstallation,
+    ],
   )
 
   useEffect(() => {
@@ -129,7 +191,20 @@ export function LinkIntentDialog() {
   if (!linkIntent || linkIntent.kind === 'open') return null
 
   const external = linkIntent.source === 'link'
-  const source = external ? 'an external link' : 'the command line'
+  const source =
+    linkIntent.kind === 'openFile' ? 'Windows' : external ? 'an external link' : 'the command line'
+  const actionLabel =
+    linkIntent.kind === 'install'
+      ? 'Install'
+      : linkIntent.kind === 'join'
+        ? 'Join'
+        : linkIntent.kind === 'openFile'
+          ? linkIntent.fileType === 'mrpack'
+            ? 'Import pack'
+            : linkIntent.fileType === 'mcworld'
+              ? 'Import world'
+              : 'Import add-on'
+          : 'Launch'
 
   return (
     <Modal
@@ -146,7 +221,7 @@ export function LinkIntentDialog() {
             Cancel
           </Button>
           <Button variant="primary" loading={busy} onClick={() => void run(linkIntent)}>
-            {linkIntent.kind === 'install' ? 'Install' : linkIntent.kind === 'join' ? 'Join' : 'Launch'}
+            {actionLabel}
           </Button>
         </>
       }
@@ -154,7 +229,15 @@ export function LinkIntentDialog() {
       <div className="link-intent">
         <div className="link-intent__action">
           <span className="link-intent__icon">
-            {linkIntent.kind === 'launch' ? <Gamepad2 /> : linkIntent.kind === 'join' ? <Server /> : <Download />}
+            {linkIntent.kind === 'launch' ? (
+              <Gamepad2 />
+            ) : linkIntent.kind === 'join' ? (
+              <Server />
+            ) : linkIntent.kind === 'openFile' ? (
+              <FileArchive />
+            ) : (
+              <Download />
+            )}
           </span>
           <div className="link-intent__copy">
             {linkIntent.kind === 'launch' ? (
@@ -170,6 +253,12 @@ export function LinkIntentDialog() {
                   {linkIntent.instance ? ` · ${linkIntent.instance}` : ' · saved profile binding when available'}
                 </span>
               </>
+            ) : linkIntent.kind === 'openFile' ? (
+              <>
+                <strong>{fileName(linkIntent.path)}</strong>
+                <span>{fileTypeLabel(linkIntent)} · Double-clicked in Windows.</span>
+                <code className="link-intent__path">{linkIntent.path}</code>
+              </>
             ) : (
               <>
                 <strong>{linkIntent.project}</strong>
@@ -182,8 +271,11 @@ export function LinkIntentDialog() {
         <div className="callout callout--warning">
           <TriangleAlert />
           <span>
-            Deep links and commands are untrusted input. Only continue if you expected this action.
-            {linkIntent.confirmed ? ' The CLI passed --yes, so it was already accepted.' : ''}
+            {linkIntent.kind === 'openFile'
+              ? 'Aqua only reads the file after you confirm. The original file is left in place.'
+              : `Deep links and commands are untrusted input. Only continue if you expected this action.${
+                  linkIntent.confirmed ? ' The CLI passed --yes, so it was already accepted.' : ''
+                }`}
           </span>
         </div>
 

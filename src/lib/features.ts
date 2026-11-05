@@ -1,6 +1,6 @@
 /**
- * Microsoft sign-in is hidden until the Azure application is approved for
- * Minecraft services. The OAuth backend stays in place so this can be turned
- * back on without restoring the UI plumbing.
+ * Microsoft sign-in is enabled: the approved Azure application credentials are
+ * read by the main process (private/microsoft.json), so the sign-in UI needs no
+ * configuration from the player.
  */
-export const MICROSOFT_AUTH_ENABLED = false
+export const MICROSOFT_AUTH_ENABLED = true

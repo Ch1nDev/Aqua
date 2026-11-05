@@ -5,8 +5,17 @@ import { normalizeSettings, validateSettings } from './core/settings.js'
 import { analyzeCrash } from './core/crash-analysis.js'
 import { normalizeServerAddress } from './core/servers.js'
 import { getPlatformLabel, getSystemInfo } from './core/system.js'
-import { ensureDir, isAllowedExternalUrl, isPathInside } from './core/util.js'
+import { atomicWriteJson, ensureDir, isAllowedExternalUrl, isPathInside } from './core/util.js'
+import {
+  buildConfigDocument,
+  MAX_CONFIG_BYTES,
+  mergePortablePreferences,
+  parseConfigDocument,
+  planInstallations,
+  planServers,
+} from './core/config-transfer.js'
 import { findConflicts } from './core/content-conflicts.js'
+import { buildPreflight } from './core/preflight.js'
 import { runImports } from './core/content-import.js'
 import { buildPlaytimeStats, sessionsToCsv } from './core/stats.js'
 
@@ -98,16 +107,22 @@ export function registerIpc({
   horizonNativeBuilder,
   installationService,
   accountManager,
+  skinService,
   javaService,
   healthService,
+  maintenanceService,
   contentIndexService,
   jobManager,
   gameManager,
+  launchQueue,
+  drainLaunchQueue,
   backupScheduler,
   discordPresence,
   logService,
+  logTail,
   blockTextureService,
   storageService,
+  factoryResetService,
   screenshotService,
   emitInstallations,
   emitActivity,
@@ -146,6 +161,7 @@ export function registerIpc({
       sessions: store.sessions,
       jobs: jobManager.list(),
       game: gameManager.getState(),
+      launchQueue: launchQueue.snapshot(),
       backups: backupScheduler.status(),
       auth: accountManager.getAuthState(),
       versions: versionService.getCachedManifestSync(),
@@ -358,6 +374,214 @@ export function registerIpc({
     return validated
   })
 
+  ipcMain.handle('reset:preview', async () => factoryResetService.preview())
+
+  ipcMain.handle('reset:cancel', async () => factoryResetService.cancel())
+
+  ipcMain.handle('reset:apply', async (_event, { token, confirmation } = {}) => {
+    const result = await factoryResetService.apply({ token, confirmation })
+    const settings = store.settings
+    try {
+      discordPresence?.applySettings(settings.discord)
+    } catch (error) {
+      result.warnings.push(`Could not update Discord presence: ${error.message}`)
+    }
+    logger.setLevel(settings.logging.level)
+    applyUiScale(settings.uiScale)
+    try {
+      await applyStartupSettings(settings)
+    } catch (error) {
+      result.warnings.push(`Could not update the login setting: ${error.message}`)
+    }
+    emitSettings(settings)
+    emitInstallations()
+    emitActivity()
+    try {
+      serverService.notifyChange()
+    } catch (error) {
+      result.warnings.push(`Could not refresh the taskbar shortcuts: ${error.message}`)
+    }
+    void backupScheduler.check?.()
+    logger.info('Launcher data reset to defaults', {
+      removedBytes: result.removed.bytes,
+      removedFiles: result.removed.files,
+      warnings: result.warnings.length,
+    })
+    return result
+  })
+
+  ipcMain.handle('config:export', async (event) => {
+    const result = await dialog.showSaveDialog(senderWindow(event), {
+      title: 'Export Aqua configuration',
+      defaultPath: path.join(
+        app.getPath('documents'),
+        `aqua-config-${new Date().toISOString().slice(0, 10)}.json`,
+      ),
+      filters: [{ name: 'Aqua configuration', extensions: ['json'] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    const document = buildConfigDocument({
+      settings: store.settings,
+      installations: store.installations,
+      servers: store.servers,
+      appVersion: app.getVersion(),
+    })
+    await atomicWriteJson(result.filePath, document)
+    logger.info('Configuration exported', {
+      path: result.filePath,
+      installations: document.installations.length,
+      servers: document.servers.length,
+    })
+    return {
+      path: result.filePath,
+      installations: document.installations.length,
+      servers: document.servers.length,
+    }
+  })
+
+  ipcMain.handle('config:import', async (event) => {
+    const selected = await dialog.showOpenDialog(senderWindow(event), {
+      title: 'Import Aqua configuration',
+      properties: ['openFile'],
+      buttonLabel: 'Inspect configuration',
+      filters: [{ name: 'Aqua configuration', extensions: ['json'] }],
+    })
+    if (selected.canceled || !selected.filePaths[0]) return null
+    const filePath = selected.filePaths[0]
+    const stat = await fsp.stat(filePath)
+    if (!stat.isFile()) throw new Error('Choose a configuration JSON file, not a folder.')
+    if (stat.size > MAX_CONFIG_BYTES) throw new Error('That configuration file is too large to import.')
+
+    let raw
+    try {
+      raw = JSON.parse(await fsp.readFile(filePath, 'utf8'))
+    } catch {
+      throw new Error('That configuration file is not valid JSON.')
+    }
+    const { document, warnings } = parseConfigDocument(raw)
+    const profilePlan = planInstallations(document.installations, store.installations)
+    const serverPlan = planServers(document.servers, store.servers)
+    const system = getSystemInfo(paths)
+    const mergedSettings = mergePortablePreferences(store.settings, document.preferences, {
+      defaults: store.defaults,
+      totalMemMb: system.totalMemMb,
+    })
+    const validated = await validateSettings(mergedSettings, { totalMemMb: system.totalMemMb })
+    if (paths.portable) validated.startup = { ...validated.startup, launchAtLogin: false }
+
+    const profileAdds = profilePlan.filter((entry) => entry.action === 'add').length
+    const profileSkips = profilePlan.length - profileAdds
+    const serverAdds = serverPlan.filter((entry) => entry.action === 'add').length
+    const serverSkips = serverPlan.length - serverAdds
+    const confirmation = await dialog.showMessageBox(senderWindow(event), {
+      type: 'question',
+      buttons: ['Import configuration', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      title: 'Import Aqua configuration',
+      message: 'Add this configuration to this PC?',
+      detail: [
+        `${profileAdds} profile${profileAdds === 1 ? '' : 's'} will be added${profileSkips ? `; ${profileSkips} already present` : ''}.`,
+        `${serverAdds} server${serverAdds === 1 ? '' : 's'} will be added${serverSkips ? `; ${serverSkips} already present` : ''}.`,
+        'Portable preferences will replace the matching local preferences.',
+        'Java, game folders, dashboard image, Microsoft client ID and window placement stay on this PC.',
+        'Profiles and servers already here are never deleted. A configuration backup is saved first.',
+      ].join('\n'),
+    })
+    if (confirmation.response !== 0) return null
+
+    let backupPath = null
+    try {
+      backupPath = path.join(path.dirname(store.configFile), 'config.before-import.json')
+      await fsp.copyFile(store.configFile, backupPath)
+    } catch (error) {
+      backupPath = null
+      warnings.push(`Could not save the configuration backup: ${error.message}`)
+    }
+
+    const previous = store.settings
+    await store.replaceSettings(validated)
+    discordPresence?.applySettings(validated.discord)
+    logger.setLevel(validated.logging.level)
+    if (previous.uiScale !== validated.uiScale) applyUiScale(validated.uiScale)
+    if (JSON.stringify(previous.startup) !== JSON.stringify(validated.startup)) {
+      await applyStartupSettings(validated)
+    }
+    emitSettings(validated)
+    void backupScheduler.check?.()
+
+    const installations = { added: 0, skipped: 0, failed: 0 }
+    const servers = { added: 0, skipped: 0, failed: 0 }
+    const installationIds = new Map()
+    for (const plan of profilePlan) {
+      const entry = plan.entry
+      if (plan.action === 'skip') {
+        installations.skipped += 1
+        if (entry.sourceId && plan.targetId) installationIds.set(entry.sourceId, plan.targetId)
+        continue
+      }
+      try {
+        const created = await installationService.create({
+          name: plan.name,
+          versionId: entry.versionId,
+          loader: entry.loader,
+          memory: entry.memoryOverride,
+          window: entry.windowOverride,
+          jvmArgs: entry.jvmArgsOverride,
+          gameArgs: entry.gameArgsOverride,
+          modpack: entry.modpack,
+        })
+        installations.added += 1
+        if (entry.sourceId) installationIds.set(entry.sourceId, created.id)
+        const metadata = {}
+        if (entry.pinned) metadata.pinned = true
+        if (entry.tags.length) metadata.tags = entry.tags
+        if (entry.color) metadata.color = entry.color
+        if (entry.sortIndex !== null) metadata.sortIndex = entry.sortIndex
+        if (entry.backupPolicy) metadata.backupPolicy = entry.backupPolicy
+        if (Object.keys(metadata).length) {
+          try {
+            await installationService.update(created.id, metadata)
+          } catch (error) {
+            warnings.push(`${entry.name}: profile metadata could not be applied (${error.message}).`)
+          }
+        }
+      } catch (error) {
+        installations.failed += 1
+        warnings.push(`${entry.name}: ${error.message}`)
+      }
+    }
+
+    for (const plan of serverPlan) {
+      if (plan.action === 'skip') {
+        servers.skipped += 1
+        if (plan.reason && plan.reason !== 'This server is already in your list.') {
+          warnings.push(`${plan.entry.name}: ${plan.reason}`)
+        }
+        continue
+      }
+      try {
+        await serverService.add({
+          name: plan.name,
+          address: plan.address,
+          edition: plan.edition,
+          installationId: plan.installationSourceId
+            ? installationIds.get(plan.installationSourceId) || null
+            : null,
+        })
+        servers.added += 1
+      } catch (error) {
+        servers.failed += 1
+        warnings.push(`${plan.name}: ${error.message}`)
+      }
+    }
+
+    await emitInstallations()
+    logger.info('Configuration imported', { path: filePath, installations, servers })
+    return { path: filePath, settings: validated, installations, servers, warnings, backupPath }
+  })
+
   ipcMain.handle('screenshots:list', async (_event, { installationId } = {}) => {
     return screenshotService.list(requireInstallation(installationId))
   })
@@ -456,6 +680,16 @@ export function registerIpc({
   })
   ipcMain.handle('accounts:refresh', async (_event, { id }) => {
     return accountManager.refreshAccount(requireString(id, 'Account ID', 64))
+  })
+
+  ipcMain.handle('skins:list', async (_event, options = {}) => {
+    return skinService.list(requireObject(options, 'Skin filters'))
+  })
+  ipcMain.handle('skins:apply', async (_event, { accountId, skin } = {}) => {
+    return skinService.apply(requireString(accountId, 'Account ID', 64), requireObject(skin, 'Skin'))
+  })
+  ipcMain.handle('skins:clear', async (_event, { accountId } = {}) => {
+    return skinService.clear(requireString(accountId, 'Account ID', 64))
   })
 
   ipcMain.handle('java:detect', async (_event, { force = false } = {}) => {
@@ -873,6 +1107,67 @@ export function registerIpc({
 
   ipcMain.handle('health:summary', async () => healthService.summary())
 
+  ipcMain.handle('maintenance:verifyAll', async () => {
+    const active = jobManager
+      .list()
+      .find((job) => job.type === 'maintenance' && (job.status === 'queued' || job.status === 'running'))
+    if (active) throw new Error('A maintenance check is already running.')
+    return jobManager.enqueueMaintenance({
+      run: ({ onProgress, shouldStop }) => maintenanceService.run({ onProgress, shouldStop }),
+    })
+  })
+
+  ipcMain.handle('maintenance:cancel', async () => {
+    const active = jobManager
+      .list()
+      .find((job) => job.type === 'maintenance' && (job.status === 'queued' || job.status === 'running'))
+    return active ? jobManager.cancel(active.id) : null
+  })
+
+  ipcMain.handle('launch:preflight', async (_event, { installationId } = {}) => {
+    const installation = requireInstallation(installationId)
+    const health = await healthService.check(installation.id)
+    let freeBytes = Number.NaN
+    try {
+      const stats = await fsp.statfs(installation.gameDir)
+      freeBytes = Number(stats.bavail) * Number(stats.bsize)
+    } catch {
+      // The health check already reports a missing game folder.
+    }
+    return buildPreflight({
+      installation,
+      health,
+      system: { ...getSystemInfo(paths), freeBytes },
+      settings: store.settings,
+    })
+  })
+
+  ipcMain.handle('launch:queue', async (_event, { installationId, safeMode = false, reason = 'manual' } = {}) => {
+    const installation = requireInstallation(installationId)
+    const snapshot = launchQueue.enqueue({
+      installationId: installation.id,
+      installationName: installation.name,
+      safeMode: safeMode === true,
+      reason,
+    })
+    // Covers the race where an install finished just before this request
+    // arrived; drain is a no-op while a game or another install is busy.
+    void drainLaunchQueue()
+    return snapshot
+  })
+
+  ipcMain.handle('launch:dequeue', async (_event, { id } = {}) => {
+    return launchQueue.remove(requireString(id, 'Queue entry ID', 128))
+  })
+
+  ipcMain.handle('launch:list', async () => launchQueue.snapshot())
+
+  ipcMain.handle('launch:resume', async () => {
+    launchQueue.resume()
+    await drainLaunchQueue()
+    return launchQueue.snapshot()
+  })
+
   ipcMain.handle('content:index', async (_event, { installationId, contentType, worldFolder = null } = {}) => {
     const installation = requireInstallation(installationId)
     const type = requireString(contentType, 'Content type', 32)
@@ -1166,8 +1461,8 @@ export function registerIpc({
     const { library, installed } = await bedrockVersionsService.status()
     return { library: [...library.values()], installed }
   })
-  ipcMain.handle('bedrock:downloadVersion', async (_event, { version } = {}) => {
-    return bedrockVersionsService.download(requireVersion(version))
+  ipcMain.handle('bedrock:downloadVersion', async (_event, { version, editor = false } = {}) => {
+    return bedrockVersionsService.download(requireVersion(version), { editor: editor === true })
   })
   ipcMain.handle('bedrock:cancelVersion', async (_event, { version } = {}) => {
     return bedrockVersionsService.cancel(requireVersion(version))
@@ -1243,6 +1538,18 @@ export function registerIpc({
   ipcMain.handle('logs:list', async () => logService.list())
   ipcMain.handle('logs:read', async (_event, request) => {
     return logService.read(requireObject(request, 'Log request'))
+  })
+  ipcMain.handle('logs:tail', async (_event, request) => {
+    const value = requireObject(request, 'Log tail request')
+    if (value.action === 'stop') {
+      return logTail.stop(typeof value.id === 'string' && value.id ? value.id : null)
+    }
+    if (value.action !== 'start') throw new Error('Unknown log tail action.')
+    return logTail.start({
+      category: requireString(value.category, 'Log category', 32),
+      file: requireString(value.file, 'Log file', 260),
+      installationId: value.installationId ? requireString(value.installationId, 'Installation ID', 128) : null,
+    })
   })
   ipcMain.handle('logs:openFolder', async (_event, request = {}) => {
     return logService.openFolder({ category: request.category, installationId: request.installationId })

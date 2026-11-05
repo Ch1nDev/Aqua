@@ -276,6 +276,16 @@ export async function checkInstallation(
             fix('open-settings', 'Open Java settings'),
           ),
         )
+      } else if (['x86', 'i386', 'ia32'].includes(String(newest.arch || '').toLowerCase())) {
+        checks.push(
+          check(
+            'java-arch',
+            'error',
+            'Java is 32-bit',
+            `Java ${newest.major} is a 32-bit runtime. Minecraft needs a 64-bit Java installation for a reliable launch.`,
+            fix('open-settings', 'Open Java settings'),
+          ),
+        )
       } else if (newest.major < required) {
         checks.push(
           check(

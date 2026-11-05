@@ -345,7 +345,7 @@ export function ScreenshotsPage() {
   if (!selectedInstallation) {
     return (
       <div className="page">
-        <PageHeader kicker="Gallery" title="Screenshots" subtitle="Screenshots are stored inside each installation's game folder." />
+        <PageHeader title="Screenshots" />
         <EmptyState
           title="No installation selected"
           description="Choose an installation to browse its screenshots. Bedrock screenshots are not included yet."
@@ -362,9 +362,8 @@ export function ScreenshotsPage() {
   return (
     <div className="page page--screenshots">
       <PageHeader
-        kicker="Gallery"
         title="Screenshots"
-        subtitle={`Java Edition screenshots for ${selectedInstallation.name}. Press F4 in game to capture one; Bedrock folders are not included yet.`}
+        subtitle={`${selectedInstallation.name} · Java Edition`}
         actions={
           <>
             {settings?.dashboardBackground ? (

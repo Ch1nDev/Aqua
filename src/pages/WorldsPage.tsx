@@ -298,7 +298,6 @@ export function WorldsPage() {
       <div className="page">
         <PageHeader
           title="Worlds & backups"
-          subtitle="Save and restore Minecraft worlds without leaving the launcher."
         />
         <div className="panel">
           <EmptyState
@@ -321,8 +320,8 @@ export function WorldsPage() {
         title="Worlds & backups"
         subtitle={
           edition === 'bedrock' && bedrockEdition
-            ? `${bedrockEdition.name} · Bedrock ${bedrockEdition.version || 'version unknown'} · worlds live in the Store app's own data folder.`
-            : `${selectedInstallation?.name} · Minecraft ${selectedInstallation?.versionId} · backups are kept in the launcher data folder.`
+            ? `${bedrockEdition.name} · Bedrock ${bedrockEdition.version || 'version unknown'}`
+            : `${selectedInstallation?.name} · Minecraft ${selectedInstallation?.versionId}`
         }
         actions={
           <div className="row gap-2">
@@ -484,8 +483,8 @@ export function WorldsPage() {
                 </h2>
                 <p className="panel-head__subtitle">
                   {bedrockBackups.length
-                    ? `${formatBytes(totalBedrockBackupSize)} stored · restores add a new world, so the original is never replaced.`
-                    : 'Back up any Bedrock world above. Archives live in the launcher data folder, not in the Store app.'}
+                    ? `${formatBytes(totalBedrockBackupSize)} stored`
+                    : 'No Bedrock backups yet.'}
                 </p>
               </div>
             </div>
@@ -695,8 +694,8 @@ export function WorldsPage() {
                 </h2>
                 <p className="panel-head__subtitle">
                   {backups.length
-                    ? `${formatBytes(totalBackupSize)} stored · restoring adds a copy, so a live world is never replaced.`
-                    : 'Create a backup from any world above. Restores never overwrite an existing save.'}
+                    ? `${formatBytes(totalBackupSize)} stored`
+                    : 'No backups for this profile yet.'}
                 </p>
               </div>
             </div>

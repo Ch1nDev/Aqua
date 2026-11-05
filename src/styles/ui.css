@@ -1,0 +1,1059 @@
+/* ==========================================================================
+   Desktop shell
+   --------------------------------------------------------------------------
+   One deliberate layer on top of the legacy component styles. It exists to do
+   three things the earlier passes did not: hold a single neutral surface
+   palette, set a legible UI type scale, and keep chrome flat so content — not
+   decoration — carries the page.
+
+   Rules of the house:
+   - Hairline borders, no glows, no gradients on controls, no lift-on-hover.
+   - One radius family: 6px controls, 10px containers.
+   - 44px top bar, 32px controls, 36px list rows, 8px spacing rhythm.
+   - The pixel face is a display face. Body text, labels and metadata are sans.
+   ========================================================================== */
+
+:root {
+  /* Neutral surfaces replace the blue-tinted charcoal of the legacy passes. */
+  --bg: #0e0f10;
+  --bg-elevated: #141516;
+  --bg-input: #101112;
+  --panel: #161718;
+  --panel-2: #1a1b1d;
+  --panel-3: #212325;
+  --panel-hover: #202224;
+
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --line-bright: rgba(255, 255, 255, 0.24);
+
+  --text: #f1f2f3;
+  --text-secondary: #d2d5d8;
+  --body: #a6abb0;
+  --muted: #8c9298;
+  --dim: #71777d;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  --font-ui: 'Quicksand', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  /* Controls, lists and labels inherit this; the pixel face stays for titles. */
+  --font-sans: var(--font-ui);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.38);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.5);
+
+  --dock-height: 44px;
+}
+
+/* --------------------------------------------------------------------------
+   Type
+   -------------------------------------------------------------------------- */
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+}
+
+/* The display face keeps its hard edges; everything else is smoothed. */
+.page-header__title,
+.home-section__head h2,
+.docs-phase__title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+/* --------------------------------------------------------------------------
+   Shell and top bar
+   -------------------------------------------------------------------------- */
+
+.app-shell {
+  background: var(--bg);
+}
+
+.app-main {
+  /* The fixed bar owns the first 44px, so content starts below it. */
+  padding-top: var(--dock-height);
+  scrollbar-gutter: stable;
+}
+
+.app-main::after {
+  display: none;
+}
+
+.nav-dock,
+.nav-dock:hover,
+.nav-dock:focus-within {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  height: var(--dock-height);
+  max-width: none;
+  padding: 0 10px;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg);
+  box-shadow: none;
+  backdrop-filter: none;
+  transform: none;
+}
+
+.nav-dock__divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--line);
+}
+
+.nav-dock__brand {
+  height: 30px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.nav-dock__brand:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-dock__brand-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.nav-dock__nav {
+  gap: 1px;
+}
+
+.nav-dock__item,
+.nav-dock .titlebar__help,
+.nav-dock .notification-bell {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.nav-dock__item:hover,
+.nav-dock .titlebar__help:hover,
+.nav-dock .notification-bell:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.nav-dock__item.is-active {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+.nav-dock__item svg {
+  width: 16px;
+  height: 16px;
+}
+
+.nav-dock .titlebar__search {
+  height: 30px;
+  margin-right: 0;
+  margin-left: auto;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 11.5px;
+}
+
+.nav-dock .titlebar__search:hover {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nav-dock__window .titlebar__control {
+  width: 34px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.nav-dock__window .titlebar__control:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.nav-dock__window .titlebar__control--close:hover {
+  background: #b4232f;
+  color: #fff;
+}
+
+/* --------------------------------------------------------------------------
+   Page chrome
+   -------------------------------------------------------------------------- */
+
+.page,
+.page--home {
+  max-width: var(--page-max);
+  padding: 24px 28px 40px;
+}
+
+.page-header {
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.page-header__title {
+  max-width: none;
+  font-size: 23px;
+  font-weight: 400;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.page-header__subtitle {
+  max-width: 72ch;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.page-header__actions {
+  gap: 6px;
+}
+
+/* Section headings inside a page. */
+.home-section {
+  margin-top: 20px;
+}
+
+.home-section__head {
+  margin-bottom: 8px;
+}
+
+.home-section__head h2 {
+  font-size: 15px;
+}
+
+.link-button {
+  gap: 5px;
+  font-size: 11.5px;
+}
+
+/* --------------------------------------------------------------------------
+   Controls
+   -------------------------------------------------------------------------- */
+
+.app-main button:not(.btn):not(:disabled):hover,
+.app-main button:not(.btn):not(:disabled):active {
+  transform: none;
+}
+
+.btn {
+  --btn-height: 32px;
+  gap: 6px;
+  height: var(--btn-height);
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  box-shadow: none;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.btn--sm {
+  --btn-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.btn--lg {
+  --btn-height: 38px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.btn:hover:not(:disabled) {
+  transform: none;
+  border-color: var(--line-bright);
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.btn:active:not(:disabled) {
+  transform: none;
+}
+
+.btn--primary,
+.btn--primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn--danger {
+  border-color: rgba(255, 130, 145, 0.35);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.btn--play,
+.page--home > .hero .btn--play {
+  height: 44px;
+  gap: 8px;
+  min-width: 200px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow: none;
+}
+
+.btn--play:hover:not(:disabled),
+.page--home > .hero .btn--play:hover:not(:disabled) {
+  background: var(--accent-strong);
+  transform: none;
+  box-shadow: none;
+}
+
+.btn--play svg {
+  width: 16px;
+  height: 16px;
+}
+
+.btn--play.is-running,
+.btn--play.is-busy {
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.input,
+.select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  box-shadow: none;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: var(--line-accent);
+  box-shadow: none;
+}
+
+.input::placeholder {
+  color: var(--dim);
+}
+
+.textarea {
+  min-height: 76px;
+  height: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.textarea:focus {
+  border-color: var(--line-accent);
+  outline: none;
+}
+
+/* The top bar drags the window; its controls never do. */
+.nav-dock {
+  -webkit-app-region: drag;
+}
+
+.nav-dock button,
+.nav-dock input,
+.nav-dock__types,
+.nav-dock .notification-pop {
+  -webkit-app-region: no-drag;
+}
+
+.chip {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+
+.chip.is-active {
+  border-color: var(--line-strong);
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+.chip__count {
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
+.badge {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.segmented {
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.segmented > button {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+
+.segmented > button.is-active {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------------------
+   Panels and rows
+   -------------------------------------------------------------------------- */
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+.panel--pad {
+  padding: 16px;
+}
+
+.panel-head {
+  padding: 14px 16px 0;
+  gap: 12px;
+  align-items: center;
+}
+
+.panel-head__title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.panel-head__subtitle,
+.settings-muted,
+.settings-hint {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.panel-body {
+  padding: 12px 16px 16px;
+}
+
+.section-kicker {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.divider {
+  background: var(--line);
+}
+
+/* Activity and list rows share one rhythm across the app. */
+.activity-item {
+  min-height: 36px;
+  padding: 6px 0;
+}
+
+.activity-item__title {
+  font-size: 12.5px;
+}
+
+.activity-item__detail,
+.activity-item__time {
+  font-size: 11px;
+}
+
+.activity-item__icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* --------------------------------------------------------------------------
+   Dashboard
+   -------------------------------------------------------------------------- */
+
+.page--home {
+  padding-top: 20px;
+}
+
+/* The hero is a working surface, not a full-screen poster: it keeps the art
+   on the right, the controls on the left, and stops competing with the data
+   underneath it. */
+.page--home > .hero,
+.hero {
+  display: block;
+  flex: none;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+.page--home > .hero .hero__grid,
+.hero__grid {
+  min-height: 400px;
+  padding: 20px 22px 22px;
+  justify-content: space-between;
+}
+
+.hero ::before {
+  display: none;
+}
+
+.hero__artwork,
+.hero--art .hero__artwork {
+  opacity: 0.9;
+  filter: saturate(0.9) brightness(0.8);
+  mask-image: none;
+}
+
+.hero--art::after {
+  background: linear-gradient(
+    90deg,
+    rgba(14, 15, 16, 0.97) 0%,
+    rgba(14, 15, 16, 0.9) 45%,
+    rgba(14, 15, 16, 0.45) 78%,
+    rgba(14, 15, 16, 0.25) 100%
+  );
+  mask-image: none;
+}
+
+.page--home > .hero .page-header {
+  margin-bottom: 14px;
+}
+
+.page--home > .hero .page-header__title {
+  font-size: 26px;
+}
+
+.page--home > .hero .page-header__actions,
+.page--home > .hero .hero__body {
+  position: static;
+  bottom: auto;
+  left: auto;
+  max-width: 620px;
+}
+
+.page--home > .hero .hero__body {
+  margin-top: 12px;
+}
+
+.page--home > .hero .hero__topline {
+  margin-top: 0;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.page--home > .hero .hero__play-actions {
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.page--home > .hero .account-switcher {
+  padding: 5px 8px;
+  border-color: var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: none;
+}
+
+.hero__installation-main,
+.hero__installation-menu,
+.page--home > .hero .hero__installation-main,
+.page--home > .hero .hero__installation-menu {
+  border-color: var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: none;
+}
+
+.hero__installation-main:hover,
+.hero__installation-menu:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.hero__installation-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.hero__installation-version {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.hero__play-title {
+  font-size: 12.5px;
+}
+
+/* The loader mark owns the card's top-right corner. */
+.hero__mark {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* The loader badge sizes to half the Safe Mode toggle's width. */
+.hero__loader,
+.page--home > .hero .hero__loader {
+  position: static;
+  display: inline-flex;
+  width: 70px;
+  height: 70px;
+  flex: none;
+  transform: none;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
+}
+
+.hero__loader .loader-mark {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+}
+
+/* The edition mark uses the same corner slot and handler as a loader mark. */
+.hero__loader > img,
+.hero__loader > .loader-mark {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+.hero__loader > .loader-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Safe Mode stays in the foot of the card. */
+.safe-mode {
+  position: absolute;
+  right: 22px;
+  bottom: 20px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(8, 10, 12, 0.55);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.safe-mode:hover {
+  border-color: var(--line-strong);
+  background: rgba(8, 10, 12, 0.8);
+  color: var(--text);
+}
+
+.safe-mode svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.safe-mode__switch {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  flex: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background 140ms ease;
+}
+
+.safe-mode__switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--body);
+  content: '';
+  transition:
+    transform 140ms ease,
+    background 140ms ease;
+}
+
+.safe-mode.is-on {
+  border-color: var(--line-accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.safe-mode.is-on .safe-mode__switch {
+  background: rgba(98, 170, 240, 0.35);
+}
+
+.safe-mode.is-on .safe-mode__switch::after {
+  background: var(--accent);
+  transform: translateX(12px);
+}
+
+@media (max-width: 900px) {
+  .hero__mark {
+    position: static;
+    align-self: flex-start;
+    margin-top: 14px;
+  }
+
+  .safe-mode {
+    position: static;
+    align-self: flex-start;
+    margin-top: 10px;
+  }
+}
+
+.hero__play-meta {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.hero__tag {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-xs);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.recent-grid {
+  gap: 8px;
+}
+
+.recent-card {
+  min-height: 48px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.recent-card:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-2);
+  transform: none;
+}
+
+.recent-card__name {
+  font-size: 12.5px;
+}
+
+.recent-card__meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.recent-card__icon {
+  width: 26px;
+  height: 26px;
+}
+
+.recent-card__arrow {
+  opacity: 0.4;
+}
+
+.home-grid {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.home-footer {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Settings
+   -------------------------------------------------------------------------- */
+
+.settings-section {
+  margin-bottom: 22px;
+}
+
+.settings-section__head {
+  margin-bottom: 8px;
+}
+
+.settings-section__head h2 {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.settings-section__head p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.settings-card {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: none;
+}
+
+.settings-field-row {
+  min-height: 44px;
+}
+
+.field__label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.field__hint,
+.field__label-note {
+  font-size: 11px;
+}
+
+/* --------------------------------------------------------------------------
+   Profile and edition artwork
+   -------------------------------------------------------------------------- */
+
+.edition-mark {
+  display: block;
+  flex: none;
+  border-radius: 5px;
+  object-fit: contain;
+}
+
+/* Edition and loader choices share one icon slot, so an image and an SVG sit
+   on the same baseline at the same size. */
+.loader-choice__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.loader-choice__icon svg,
+.loader-choice__icon img,
+.loader-choice__icon .edition-mark {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The artwork brings its own colour, so the icon chip steps out of the way. */
+.installation-card__cube:has(.edition-mark),
+.installation-card__cube:has(.loader-mark),
+.hero__installation-icon:has(.edition-mark),
+.hero__installation-icon:has(.loader-mark),
+.recent-card__icon:has(.edition-mark),
+.recent-card__icon:has(.loader-mark),
+.recent-card__icon:has(.pack-art) {
+  background: transparent;
+}
+
+.hero__installation-icon:has(img),
+.recent-card__icon:has(img) {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Tables, dialogs and overlays
+   -------------------------------------------------------------------------- */
+
+.modal {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  background: var(--panel-2);
+  box-shadow: var(--shadow-lg);
+}
+
+.modal__title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 400;
+}
+
+.modal__subtitle {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toast,
+.notification-pop,
+.command-palette,
+.menu {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: none;
+}
+
+.command-palette__hint {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbars
+   -------------------------------------------------------------------------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+  background-clip: padding-box;
+}

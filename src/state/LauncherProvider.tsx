@@ -31,8 +31,11 @@ import type {
   InstallationInput,
   JavaInfo,
   LaunchErrorState,
+  LaunchQueueEntry,
+  LaunchQueueSnapshot,
   LinkIntent,
   PageName,
+  PreflightResult,
   RouteState,
   ServerEdition,
   SessionEntry,
@@ -44,9 +47,9 @@ import type {
 
 type AuthInputStatus = 'idle' | 'starting' | 'waiting' | 'finalizing' | 'success' | 'error'
 
-interface PendingLaunch {
-  installationId: string
-  jobId: string
+interface PendingPreflight {
+  result: PreflightResult
+  safeMode: boolean
 }
 
 interface LauncherContextValue {
@@ -64,6 +67,7 @@ interface LauncherContextValue {
   jobs: DownloadJob[]
   activeJobs: DownloadJob[]
   game: GameState
+  launchQueue: LaunchQueueSnapshot
   auth: AuthState
   versions: VersionManifest | null
   versionsLoading: boolean
@@ -104,6 +108,10 @@ interface LauncherContextValue {
   cancelAuth: () => Promise<void>
   launchError: LaunchErrorState | null
   clearLaunchError: () => void
+  /** The pre-launch checklist waiting for the player, or null. */
+  preflight: PendingPreflight | null
+  confirmPreflight: () => Promise<void>
+  cancelPreflight: () => void
   launchingId: string | null
   bedrock: BedrockStatus | null
   bedrockLoading: boolean
@@ -128,7 +136,7 @@ interface LauncherContextValue {
   bedrockLibrary: BedrockLibraryEntry[]
   bedrockDownloads: Record<string, BedrockDownloadProgress>
   refreshBedrockVersions: (force?: boolean) => Promise<void>
-  downloadBedrockVersion: (version: string) => Promise<boolean>
+  downloadBedrockVersion: (version: string, options?: { editor?: boolean }) => Promise<boolean>
   cancelBedrockVersion: (version: string) => Promise<void>
   removeBedrockVersion: (version: string) => Promise<void>
   openBedrockVersionFolder: (version: string) => Promise<void>
@@ -150,6 +158,13 @@ interface LauncherContextValue {
   confirmJoin: () => Promise<void>
   dismissJoinWarning: () => void
   launchGame: (installationId: string, options?: { safeMode?: boolean }) => Promise<void>
+  queueLaunch: (
+    installationId: string,
+    options?: { safeMode?: boolean; reason?: LaunchQueueEntry['reason'] },
+  ) => Promise<LaunchQueueSnapshot | null>
+  dequeueLaunch: (id: string) => Promise<LaunchQueueSnapshot | null>
+  resumeLaunchQueue: () => Promise<LaunchQueueSnapshot | null>
+  launchQueued: (entry: LaunchQueueEntry) => Promise<void>
   installGame: (installationId: string) => Promise<DownloadJob | null>
   retryLaunch: () => Promise<void>
   createInstallation: (input: InstallationInput) => Promise<Installation>
@@ -176,6 +191,7 @@ const LauncherContext = createContext<LauncherContextValue | null>(null)
 
 const emptyAuth: AuthState = { status: 'idle' }
 const emptyGame: GameState = { status: 'idle' }
+const emptyLaunchQueue: LaunchQueueSnapshot = { entries: [], paused: false, reason: null }
 
 function makeToastId() {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-math`
@@ -214,14 +230,15 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const [authOpen, setAuthOpen] = useState(false)
   const [authInitialMode, setAuthInitialMode] = useState<AuthMode | null>(null)
   const [launchError, setLaunchError] = useState<LaunchErrorState | null>(null)
+  const [preflight, setPreflight] = useState<PendingPreflight | null>(null)
   const [launchingId, setLaunchingId] = useState<string | null>(null)
   const [joinWarning, setJoinWarning] = useState<JoinWarningState | null>(null)
-  const [pendingLaunch, setPendingLaunch] = useState<PendingLaunch | null>(null)
   const [windowMaximized, setWindowMaximized] = useState(false)
   const [storageProgress, setStorageProgress] = useState<StorageProgress | null>(null)
   const dataRef = useRef<Bootstrap | null>(null)
   const toastTimers = useRef(new Map<string, number>())
   const initialised = useRef(false)
+  const preflightDismissed = useRef(new Set<string>())
   const refreshedJavaJobs = useRef(new Set<string>())
   const versionRequest = useRef(0)
   const javaRequest = useRef(0)
@@ -404,6 +421,11 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
           }
           break
         }
+        case 'launch-queue': {
+          const payload = event.payload as EventPayloadMap['launch-queue']
+          setData((current) => (current ? { ...current, launchQueue: payload } : current))
+          break
+        }
         case 'auth': {
           const payload = event.payload as EventPayloadMap['auth']
           setData((current) => (current ? { ...current, auth: payload } : current))
@@ -538,7 +560,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const launchGame = useCallback(
+  const performLaunch = useCallback(
     async (installationId: string, options: { safeMode?: boolean } = {}) => {
       const current = dataRef.current
       const installation = current?.installations.find((item) => item.id === installationId)
@@ -561,6 +583,97 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     [refreshInstallations],
   )
 
+  const launchGame = useCallback(
+    async (installationId: string, options: { safeMode?: boolean } = {}) => {
+      if (preflightDismissed.current.has(installationId)) {
+        await performLaunch(installationId, options)
+        return
+      }
+      try {
+        const result = await api.game.preflight(installationId)
+        if (result.rows.length) {
+          setPreflight({ result, safeMode: options.safeMode === true })
+          setLaunchError(null)
+          return
+        }
+      } catch (error) {
+        setLaunchError({
+          title: 'Could not check this installation',
+          message: getErrorMessage(error),
+          installationId,
+        })
+        return
+      }
+      await performLaunch(installationId, options)
+    },
+    [performLaunch],
+  )
+
+  const queueLaunch = useCallback(
+    async (
+      installationId: string,
+      options: { safeMode?: boolean; reason?: LaunchQueueEntry['reason'] } = {},
+    ): Promise<LaunchQueueSnapshot | null> => {
+      try {
+        const snapshot = await api.game.queue(
+          installationId,
+          options.safeMode === true,
+          options.reason || 'manual',
+        )
+        setData((current) => (current ? { ...current, launchQueue: snapshot } : current))
+        return snapshot
+      } catch (error) {
+        pushToast({ level: 'error', title: 'Could not queue the launch', message: getErrorMessage(error) })
+        return null
+      }
+    },
+    [pushToast],
+  )
+
+  const dequeueLaunch = useCallback(
+    async (id: string): Promise<LaunchQueueSnapshot | null> => {
+      try {
+        const snapshot = await api.game.dequeue(id)
+        setData((current) => (current ? { ...current, launchQueue: snapshot } : current))
+        return snapshot
+      } catch (error) {
+        pushToast({ level: 'error', title: 'Could not remove the queued launch', message: getErrorMessage(error) })
+        return null
+      }
+    },
+    [pushToast],
+  )
+
+  const resumeLaunchQueue = useCallback(async (): Promise<LaunchQueueSnapshot | null> => {
+    try {
+      const snapshot = await api.game.resumeQueue()
+      setData((current) => (current ? { ...current, launchQueue: snapshot } : current))
+      return snapshot
+    } catch (error) {
+      pushToast({ level: 'error', title: 'Could not resume the launch queue', message: getErrorMessage(error) })
+      return null
+    }
+  }, [pushToast])
+
+  const launchQueued = useCallback(
+    async (entry: LaunchQueueEntry) => {
+      const snapshot = await dequeueLaunch(entry.id)
+      if (!snapshot) return
+      await launchGame(entry.installationId, { safeMode: entry.safeMode })
+    },
+    [dequeueLaunch, launchGame],
+  )
+
+  const confirmPreflight = useCallback(async () => {
+    const pending = preflight
+    if (!pending || pending.result.rows.some((row) => row.level === 'error')) return
+    preflightDismissed.current.add(pending.result.installationId)
+    setPreflight(null)
+    await performLaunch(pending.result.installationId, { safeMode: pending.safeMode })
+  }, [performLaunch, preflight])
+
+  const cancelPreflight = useCallback(() => setPreflight(null), [])
+
   const launchBedrock = useCallback(
     async (
       editionId: string,
@@ -578,6 +691,12 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
             level: 'success',
             title: `Joining ${result.address}`,
             message: 'Minecraft for Windows is connecting through its deep link.',
+          })
+        } else if (result.editor) {
+          pushToast({
+            level: 'success',
+            title: 'Opening Minecraft Editor',
+            message: 'Minecraft is starting in Creator mode.',
           })
         } else {
           pushToast({
@@ -631,19 +750,22 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const downloadBedrockVersion = useCallback(
-    async (version: string) => {
+    async (version: string, options: { editor?: boolean } = {}) => {
       setBedrockDownloads((current) => ({
         ...current,
         [version]: { version, phase: 'resolving', receivedBytes: 0, totalBytes: null },
       }))
       try {
-        const result = await api.bedrock.downloadVersion(version)
+        const result = await api.bedrock.downloadVersion(version, options.editor === true)
         void refreshBedrockLibrary()
         pushToast({
           level: 'success',
-          title: `Bedrock ${version} downloaded`,
-          message:
-            result.package === 'appx'
+          title: result.editor ? `Editor ${version} downloaded` : `Bedrock ${version} downloaded`,
+          message: result.editor
+            ? result.package === 'appx'
+              ? 'It is listed as an Editor version. Register it, then Play opens Creator mode.'
+              : 'It is listed as an Editor version. Install it through Windows, then Play opens Creator mode.'
+            : result.package === 'appx'
               ? 'Register it to play this build alongside your Store copy.'
               : 'MSIXVC builds install through the Microsoft Store; the package is saved on disk.',
         })
@@ -956,12 +1078,26 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         }
       }
       if (current.game.status === 'preparing' || current.game.status === 'running') {
-        pushToast({
-          level: 'info',
-          title: 'Minecraft is already running',
-          message: 'Close the game before launching another instance.',
+        if (!current.accounts.activeAccountId) {
+          setAuthOpen(true)
+          pushToast({
+            level: 'info',
+            title: 'Add a player profile',
+            message: 'Connect Microsoft or create an offline profile to queue Minecraft.',
+          })
+          return
+        }
+        const queued = await queueLaunch(installationId, {
+          reason: current.game.status === 'preparing' ? 'preparing' : 'game-running',
         })
-        if (current.game.installationId === installationId) navigate('logs', { category: 'game', installationId })
+        if (queued) {
+          pushToast({
+            level: 'info',
+            title: 'Launch queued',
+            message: 'Aqua will start it after the current session closes cleanly.',
+          })
+          navigate('tasks')
+        }
         return
       }
       if (!current.accounts.activeAccountId) {
@@ -980,13 +1116,21 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
           (job.status === 'running' || job.status === 'queued'),
       )
       if (activeInstallJob) {
-        navigate('tasks')
+        const queued = await queueLaunch(installationId, { reason: 'install' })
+        if (queued) {
+          navigate('tasks')
+          pushToast({
+            level: 'info',
+            title: 'Launch queued',
+            message: 'Aqua will start the game when the install finishes.',
+          })
+        }
         return
       }
       if (!installation.installed) {
         try {
-          const job = await api.installations.install(installationId)
-          setPendingLaunch({ installationId, jobId: job.id })
+          await api.installations.install(installationId)
+          await queueLaunch(installationId, { reason: 'install' })
           navigate('tasks')
           pushToast({
             level: 'info',
@@ -1004,20 +1148,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       }
       await launchGame(installationId)
     },
-    [launchGame, navigate, pushToast],
+    [launchGame, navigate, pushToast, queueLaunch],
   )
-
-  useEffect(() => {
-    if (!pendingLaunch || !data) return
-    const job = data.jobs.find((entry) => entry.id === pendingLaunch.jobId)
-    if (!job) return
-    if (job.status === 'completed') {
-      setPendingLaunch(null)
-      void launchGame(pendingLaunch.installationId)
-    } else if (job.status === 'failed' || job.status === 'cancelled') {
-      setPendingLaunch(null)
-    }
-  }, [data, launchGame, pendingLaunch])
 
   const retryLaunch = useCallback(async () => {
     if (!launchError?.installationId) return
@@ -1256,6 +1388,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const jobs = data?.jobs ?? []
   const activeJobs = jobs.filter((job) => job.status === 'running' || job.status === 'queued')
   const game = data?.game ?? emptyGame
+  const launchQueue = data?.launchQueue ?? emptyLaunchQueue
   const auth = data?.auth ?? emptyAuth
   const authPhase = (auth.status as AuthInputStatus) || 'idle'
 
@@ -1283,6 +1416,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       jobs,
       activeJobs,
       game,
+      launchQueue,
       auth,
       versions,
       versionsLoading,
@@ -1320,6 +1454,9 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       cancelAuth,
       launchError,
       clearLaunchError,
+      preflight,
+      confirmPreflight,
+      cancelPreflight,
       launchingId,
       bedrock,
       bedrockLoading,
@@ -1350,6 +1487,10 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       confirmJoin,
       dismissJoinWarning,
       launchGame,
+      queueLaunch,
+      dequeueLaunch,
+      resumeLaunchQueue,
+      launchQueued,
       installGame,
       retryLaunch,
       createInstallation,
@@ -1409,6 +1550,11 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       dismissToast,
       duplicateInstallation,
       game,
+      launchQueue,
+      dequeueLaunch,
+      launchQueued,
+      queueLaunch,
+      resumeLaunchQueue,
       installDialog,
       installGame,
       installations,
@@ -1427,6 +1573,9 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       clearNotifications,
       notifications,
       launchError,
+      preflight,
+      confirmPreflight,
+      cancelPreflight,
       launchGame,
       launchHorizon,
       launchingHorizonTag,

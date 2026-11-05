@@ -3,13 +3,39 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { safeStorage, shell } from 'electron'
 import { atomicWriteFile, errorMessage, fetchWithRetry } from './util.js'
+import { describeMissingCredentials, readMicrosoftCredentials } from './private-credentials.js'
 
+// Minecraft Java Edition is tied to personal Microsoft accounts, and the
+// XboxLive.signin scope only exists in the consumer tenant. /common resolves to
+// a work tenant for organizational accounts, which rejects that scope outright,
+// so the consumer endpoint is used for both authorize and token requests.
 const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
 const AUTHORIZE_ENDPOINT = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize'
 const SCOPES = 'XboxLive.signin offline_access'
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
+
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+// The launcher icon is small enough to inline into the sign-in page, which is
+// served from a loopback callback and cannot load app assets by URL.
+const AUTH_ICON_FILES = [path.join(APP_ROOT, 'dist', 'icon.png'), path.join(APP_ROOT, 'public', 'icon.png')]
+
+let authIconPromise = null
+
+function authIconDataUrl() {
+  if (!authIconPromise) {
+    authIconPromise = (async () => {
+      for (const file of AUTH_ICON_FILES) {
+        const bytes = await fsp.readFile(file).catch(() => null)
+        if (bytes?.length) return 'data:image/png;base64,' + bytes.toString('base64')
+      }
+      return null
+    })()
+  }
+  return authIconPromise
+}
 
 function base64Url(buffer) {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
@@ -24,7 +50,7 @@ function offlinePlayerUuid(name) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-function friendlyMicrosoftError(status, body) {
+function friendlyMicrosoftError(status, body, grantType = '') {
   let parsed = null
   try {
     parsed = typeof body === 'string' ? JSON.parse(body) : body
@@ -47,7 +73,13 @@ function friendlyMicrosoftError(status, body) {
   if (aad === 'AADSTS9002326') {
     return 'The Azure redirect URI is not configured as a mobile and desktop application. Add http://localhost as a mobile/desktop redirect.'
   }
+  if (aad === 'AADSTS90023') {
+    return 'This Azure app is registered as a public client, so Microsoft refuses a client secret. Remove clientSecret from private/microsoft.json: PKCE sign-in needs none.'
+  }
   if (code === 'invalid_grant' || /expired|revoked/i.test(description)) {
+    if (grantType === 'authorization_code') {
+      return 'Microsoft rejected the sign-in code before it could be exchanged. Close the leftover sign-in tab and try again from the launcher.'
+    }
     return 'Your Microsoft session has expired. Sign in again to continue.'
   }
   if (code === 'invalid_client') {
@@ -79,14 +111,36 @@ async function tokenRequest(params) {
     throw new Error('Microsoft returned an unreadable response.')
   }
   if (!response.ok || body?.error) {
-    const error = new Error(friendlyMicrosoftError(response.status, text))
+    const error = new Error(friendlyMicrosoftError(response.status, text, params?.grant_type))
     error.status = response.status
+    error.aadCode = String(body?.error_description || body?.error || '').match(/AADSTS\d+/)?.[0] || ''
     error.authError = ['invalid_grant', 'invalid_client', 'unauthorized_client', 'consent_required'].includes(
       body?.error,
     )
     throw error
   }
   return body
+}
+
+/**
+ * Exchanges token parameters, adding the app secret only when one is configured.
+ * A registration with public client flows enabled rejects a secret outright
+ * (AADSTS90023), so that specific refusal is retried without it: PKCE desktop
+ * clients never need a secret, and confidential apps still get theirs.
+ */
+async function requestToken(params, clientSecret) {
+  if (!clientSecret) return tokenRequest(params)
+  try {
+    // The PKCE (public client) exchange is attempted first. A desktop app with
+    // public client flows rejects a secret outright, and that rejected attempt
+    // still invalidates the single-use authorization code, so the secret must
+    // not be sent speculatively. A confidential registration answers
+    // AADSTS7000218 instead, and only then is the code retried with the secret.
+    return await tokenRequest(params)
+  } catch (error) {
+    if (error.aadCode !== 'AADSTS7000218' && error.aadCode !== 'AADSTS7000219') throw error
+    return tokenRequest({ ...params, client_secret: clientSecret })
+  }
 }
 
 async function postJson(url, body, { signal } = {}) {
@@ -162,19 +216,168 @@ function xstsMessage(xerr) {
   }
 }
 
-function authPage(ok, title, message) {
-  const color = ok ? '#79e08b' : '#ff8a8a'
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title><style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#080d0a;color:#eff7f1;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-main{width:min(440px,calc(100vw - 40px));padding:36px;border:1px solid #233329;background:#0e1712;border-radius:20px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
-.logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,${color},#2f7d42);margin-bottom:24px}
-h1{font-size:21px;margin:0 0 10px;letter-spacing:-.02em}p{color:#91a697;line-height:1.6;font-size:14px;margin:0}.hint{margin-top:26px;padding-top:18px;border-top:1px solid #1d2b23;color:#64786b;font-size:12px}
-</style></head><body><main><div class="logo"></div><h1>${title}</h1><p>${message}</p><p class="hint">Aqua Launcher · You can close this window and return to the launcher.</p></main></body></html>`
+function authPage(ok, title, message, { artwork = null, icon = null } = {}) {
+  const tone = ok ? '#7fe0b0' : '#ff9aa8'
+  const label = ok ? 'Account connected' : 'Sign-in issue'
+  const art = artwork
+    ? `<div class="art" style="background-image:url('${artwork}')" aria-hidden="true"></div><div class="shade" aria-hidden="true"></div>`
+    : ''
+  const mark = icon
+    ? `<img class="brand__icon" src="${icon}" alt="" width="30" height="30">`
+    : '<span class="brand__icon brand__icon--fallback" aria-hidden="true">A</span>'
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>${title} · Aqua Launcher</title>
+<style>
+  :root {
+    --text: #ffffff;
+    --body: #a3a3a3;
+    --dim: #666666;
+    --tone: ${tone};
+    --display: 'Minecraftia', 'Cascadia Mono', ui-monospace, Consolas, monospace;
+    --mono: 'Geist Mono', 'Cascadia Mono', ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 40px 20px;
+    color: var(--body);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(900px 600px at 50% 0%, rgba(41, 100, 164, 0.22), transparent 65%),
+      #000000;
+  }
+  .art {
+    position: fixed;
+    inset: 0;
+    background-color: #000000;
+    background-size: cover;
+    background-position: center;
+  }
+  .shade {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.58) 0%, rgba(0, 0, 0, 0.72) 48%, rgba(0, 0, 0, 0.88) 100%);
+  }
+  .card {
+    position: relative;
+    width: min(440px, 100%);
+    padding: 30px 32px 28px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    background: rgba(12, 12, 12, 0.82);
+    -webkit-backdrop-filter: blur(18px) saturate(1.1);
+    backdrop-filter: blur(18px) saturate(1.1);
+    box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.85);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 24px; }
+  .brand__icon {
+    display: block;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 7px;
+  }
+  .brand__icon--fallback {
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    font-family: var(--display);
+    font-size: 14px;
+  }
+  .brand__name {
+    display: block;
+    font-family: var(--display);
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    line-height: 1.3;
+    color: var(--text);
+  }
+  .brand__sub {
+    display: block;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .eyebrow {
+    margin: 0 0 8px;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--tone);
+  }
+  .title {
+    margin: 0 0 10px;
+    font-family: var(--display);
+    font-size: 21px;
+    font-weight: 400;
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .message { margin: 0; color: var(--body); }
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 24px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 11.5px;
+    color: var(--dim);
+  }
+  .meta__dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--tone);
+  }
+</style>
+</head>
+<body>
+  ${art}
+  <main class="card" role="status">
+    <div class="brand">
+      ${mark}
+      <span>
+        <span class="brand__name">AQUA</span>
+        <span class="brand__sub">Launcher</span>
+      </span>
+    </div>
+    <h1 class="title">${title}</h1>
+    <p class="message">${message}</p>
+  </main>
+</body>
+</html>`
 }
 
 export class AccountManager {
-  constructor({ paths, store, logger, emitAccounts, emitAuth, emitActivity, emitNotification }) {
+  constructor({
+    paths,
+    store,
+    logger,
+    artworkService = null,
+    emitAccounts,
+    emitAuth,
+    emitActivity,
+    emitNotification,
+  }) {
     this.paths = paths
     this.store = store
     this.logger = logger
@@ -189,6 +392,10 @@ export class AccountManager {
     this.activeLogin = null
     this.authState = { status: 'idle' }
     this.refreshInFlight = new Map()
+    this.artworkService = artworkService
+    this.authArtwork = null
+    this.authArtworkPromise = null
+    this.authIcon = null
   }
 
   get secureStorageAvailable() {
@@ -196,6 +403,7 @@ export class AccountManager {
   }
 
   async init() {
+    this.authIcon = await authIconDataUrl()
     try {
       this.persistenceAvailable = safeStorage.isEncryptionAvailable()
     } catch {
@@ -323,10 +531,10 @@ export class AccountManager {
   }
 
   async beginLogin() {
-    const clientId = this.store.settings.microsoftClientId
-    if (!clientId) {
-      throw new Error('Add your Microsoft Azure application (client) ID before signing in.')
-    }
+    const credentials = readMicrosoftCredentials()
+    const clientId = credentials.clientId
+    if (!clientId) throw new Error(describeMissingCredentials(credentials))
+    void this.prepareAuthArtwork()
     if (this.activeLogin && !this.activeLogin.settled) {
       this.cancelLogin()
     }
@@ -337,6 +545,7 @@ export class AccountManager {
     const login = {
       id: crypto.randomUUID(),
       clientId,
+      clientSecret: credentials.clientSecret,
       state,
       verifier,
       settled: false,
@@ -345,23 +554,34 @@ export class AccountManager {
       redirectUri: null,
     }
 
-    const server = http.createServer((request, response) => {
+    const server = http.createServer(async (request, response) => {
       const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
       if (requestUrl.pathname !== '/callback') {
         response.writeHead(404, { 'Content-Type': 'text/plain' })
         response.end('Not found')
         return
       }
+      const artwork = await this.authPageArtwork()
       if (login.settled) {
         response.writeHead(409, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(authPage(false, 'Sign-in already handled', 'This sign-in request was already completed.'))
+        response.end(
+          authPage(false, 'Sign-in already handled', 'This sign-in request was already completed.', {
+            artwork,
+            icon: this.authIcon,
+          }),
+        )
         return
       }
       if (requestUrl.searchParams.get('state') !== login.state) {
         login.settled = true
         clearTimeout(login.timer)
         response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(authPage(false, 'Sign-in could not be verified', 'The security state did not match. Please try again.'))
+        response.end(
+          authPage(false, 'Sign-in could not be verified', 'The security state did not match. Please try again.', {
+            artwork,
+            icon: this.authIcon,
+          }),
+        )
         server.close()
         this.failLogin(login, 'Microsoft sign-in could not be verified. Please try again.')
         return
@@ -372,7 +592,12 @@ export class AccountManager {
         clearTimeout(login.timer)
         const description = requestUrl.searchParams.get('error_description') || oauthError
         response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(authPage(false, 'Sign-in was not completed', 'You can return to Aqua and try again.'))
+        response.end(
+          authPage(false, 'Sign-in was not completed', 'You can return to Aqua and try again.', {
+            artwork,
+            icon: this.authIcon,
+          }),
+        )
         server.close()
         this.failLogin(login, description.replace(/\+/g, ' ').slice(0, 400))
         return
@@ -380,14 +605,22 @@ export class AccountManager {
       const code = requestUrl.searchParams.get('code')
       if (!code) {
         response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(authPage(false, 'Missing authorization code', 'Please try signing in again.'))
+        response.end(
+          authPage(false, 'Missing authorization code', 'Please try signing in again.', {
+            artwork,
+            icon: this.authIcon,
+          }),
+        )
         return
       }
       login.settled = true
       clearTimeout(login.timer)
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       response.end(
-        authPage(true, 'You’re signed in', 'Microsoft authentication is complete. Aqua is finishing your Minecraft session.'),
+        authPage(true, 'You’re signed in', 'You can close this window.', {
+          artwork,
+          icon: this.authIcon,
+        }),
       )
       server.close()
       this.completeLogin(login, code).catch(() => {})
@@ -439,6 +672,38 @@ export class AccountManager {
     return { url: authUrl.toString() }
   }
 
+  /**
+   * Kicks off the random version backdrop for the browser pages. The player
+   * needs a few seconds to sign in, so it is normally ready by the callback.
+   */
+  prepareAuthArtwork() {
+    this.authArtwork = null
+    this.authArtworkPromise = (async () => {
+      try {
+        // Each sign-in picks a new release, while every page of that attempt
+        // keeps showing the same backdrop.
+        const art = await this.artworkService?.getRandomVersionArt?.({ fresh: true })
+        this.authArtwork = art?.dataUrl || null
+      } catch {
+        this.authArtwork = null
+      }
+      return this.authArtwork
+    })()
+    return this.authArtworkPromise
+  }
+
+  /** The prepared backdrop, waiting briefly on the first page only. */
+  async authPageArtwork() {
+    if (!this.authArtworkPromise) this.prepareAuthArtwork()
+    if (!this.authArtwork) {
+      await Promise.race([
+        this.authArtworkPromise,
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ])
+    }
+    return this.authArtwork
+  }
+
   failLogin(login, message) {
     if (this.activeLogin?.id === login.id) this.activeLogin = null
     this.logger.warn('Microsoft sign-in failed', { message })
@@ -452,14 +717,17 @@ export class AccountManager {
         message: 'Verifying your Microsoft account…',
         startedAt: new Date().toISOString(),
       })
-      const tokenBody = await tokenRequest({
-        client_id: login.clientId,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: login.redirectUri,
-        code_verifier: login.verifier,
-        scope: SCOPES,
-      })
+      const tokenBody = await requestToken(
+        {
+          client_id: login.clientId,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: login.redirectUri,
+          code_verifier: login.verifier,
+          scope: SCOPES,
+        },
+        login.clientSecret,
+      )
       const account = await this.authenticateMinecraft(tokenBody, login.clientId)
       await this.persistAccount(account)
       this.setAuthState({
@@ -675,8 +943,9 @@ export class AccountManager {
         return token
       }
 
-      const clientId = token.clientId || this.store.settings.microsoftClientId
-      if (!clientId) throw new Error('Microsoft application ID is missing. Add it in Settings and sign in again.')
+      const credentials = readMicrosoftCredentials()
+      const clientId = token.clientId || credentials.clientId
+      if (!clientId) throw new Error(describeMissingCredentials(credentials))
       let microsoftAccessToken = token.microsoftAccessToken
       let microsoftExpiresAt = token.microsoftExpiresAt
       let refreshToken = token.refreshToken
@@ -687,12 +956,15 @@ export class AccountManager {
 
       try {
         if (force || !microsoftValid) {
-          const refreshed = await tokenRequest({
-            client_id: clientId,
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            scope: SCOPES,
-          })
+          const refreshed = await requestToken(
+            {
+              client_id: clientId,
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              scope: SCOPES,
+            },
+            credentials.clientSecret,
+          )
           microsoftAccessToken = refreshed.access_token
           microsoftExpiresAt = new Date(
             Date.now() + (Number(refreshed.expires_in) || 3600) * 1000,
@@ -759,7 +1031,7 @@ export class AccountManager {
       uuid: account.uuid,
       name: account.name,
       xuid: token.xuid || account.xuid || '',
-      clientId: token.clientId || this.store.settings.microsoftClientId,
+      clientId: token.clientId || readMicrosoftCredentials().clientId,
       userType: 'msa',
     }
   }

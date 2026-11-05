@@ -67,54 +67,6 @@ export function AccountSwitcherToggle({
     }
   }, [installation.id, supported])
 
-  const install = useCallback(async () => {
-    if (!supported || installing || (status !== 'missing' && status !== 'disabled')) return
-    setInstalling(true)
-    try {
-      if (status === 'disabled' && disabledFile) {
-        await api.mods.toggle(installation.id, disabledFile, 'mod')
-        if (!mounted.current) return
-        setStatus('installed')
-        setDisabledFile(null)
-        pushToast({
-          level: 'success',
-          title: 'Account switcher enabled',
-          message: 'Add your Microsoft account from Minecraft’s account menu.',
-        })
-        return
-      }
-      const result = await api.mods.install(installation.id, PROJECT_ID, null, 'mod')
-      if (!mounted.current) return
-      setStatus('installed')
-      const extras = result.installed.filter((entry) => entry.projectId !== PROJECT_ID)
-      if (result.skipped.length) {
-        pushToast({
-          level: 'warning',
-          title: 'Account switcher installed with missing files',
-          message: 'A required dependency could not be resolved. Check Extra content before playing.',
-        })
-      } else {
-        pushToast({
-          level: 'success',
-          title: 'Account switcher installed',
-          message: extras.length
-            ? `${extras.map((entry) => entry.name).join(', ')} was added too. Add your Microsoft account from Minecraft's account menu.`
-            : 'Launch this profile, then add your Microsoft account from Minecraft’s account menu.',
-        })
-      }
-    } catch (error) {
-      if (mounted.current) {
-        pushToast({
-          level: 'error',
-          title: 'Could not install the account switcher',
-          message: getErrorMessage(error),
-        })
-      }
-    } finally {
-      if (mounted.current) setInstalling(false)
-    }
-  }, [disabledFile, installation.id, installing, pushToast, status, supported])
-
   const title = !supported
     ? 'This profile has no mod loader. Use Fabric, Quilt, Forge, or NeoForge to install the account switcher.'
     : status === 'installed'
@@ -136,46 +88,4 @@ export function AccountSwitcherToggle({
             : activeAccount?.type === 'offline'
               ? 'Launch offline, sign in in-game'
               : 'Install in-game sign-in'
-
-  return (
-    <label
-      className={cx(
-        'account-switcher',
-        status === 'installed' && 'is-installed',
-        !supported && 'is-unavailable',
-      )}
-      title={title}
-    >
-      <input
-        type="checkbox"
-        checked={status === 'installed'}
-        disabled={!supported || status === 'checking' || installing || disabled || status === 'installed'}
-        onChange={(event) => {
-          if (event.target.checked) void install()
-        }}
-        aria-label={
-          status === 'installed'
-            ? 'In-Game Account Switcher installed'
-            : status === 'disabled'
-              ? 'Enable In-Game Account Switcher'
-              : 'Install In-Game Account Switcher'
-        }
-      />
-      <span className="account-switcher__box" aria-hidden="true">
-        {status === 'checking' || installing ? <Spinner /> : status === 'installed' ? <Check /> : <ShieldCheck />}
-      </span>
-      <span className="account-switcher__copy">
-        <span className="account-switcher__title">
-          {installing
-            ? 'Installing account switcher'
-            : status === 'installed'
-              ? 'Account switcher ready'
-              : status === 'disabled'
-                ? 'Account switcher disabled'
-                : 'Account switcher'}
-        </span>
-        <span className="account-switcher__hint">{hint}</span>
-      </span>
-    </label>
-  )
 }

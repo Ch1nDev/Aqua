@@ -160,6 +160,14 @@ export async function extractPackage(archive, directory) {
 /** Electron hands back a web stream; tests and other callers may pass a Node one. */
 const INSTALLED_TTL_MS = 60000
 
+/** A build downloaded from the Editor screen is still Bedrock, but it is labelled Editor. */
+const EDITOR_MARKER = 'editor.json'
+
+async function isEditorDownload(directory) {
+  const marker = await fsp.stat(path.join(directory, EDITOR_MARKER)).catch(() => null)
+  return Boolean(marker?.isFile())
+}
+
 /** The framework packages a manifest declares, e.g. Microsoft.VCLibs.140.00. */
 export function parsePackageDependencies(xml) {
   const text = String(xml ?? '')
@@ -280,6 +288,7 @@ export class BedrockVersionsService {
         version,
         directory,
         layout: manifestStat?.isFile() ? 'appx' : 'msixvc',
+        editor: await isEditorDownload(directory),
         sizeBytes: await directorySize(directory),
       })
     }
@@ -399,7 +408,7 @@ export class BedrockVersionsService {
    * switchers do) so Windows can register them; MSIXVC packages stay as files,
    * because Windows only takes those by installing them.
    */
-  async download(version) {
+  async download(version, { editor = false } = {}) {
     const entry = await this.findVersion(version)
     if (!entry) throw new Error('That Bedrock version is not in the catalog.')
     if (this.inFlight.has(version)) throw new Error('That version is already downloading.')
@@ -456,10 +465,13 @@ export class BedrockVersionsService {
         await fsp.rename(archive, path.join(directory, 'package.msixvc'))
       }
 
-      this.logger?.info('Downloaded a Bedrock version', { version, package: entry.package })
+      // The download replaces the folder, so the label always reflects this download.
+      if (editor) await atomicWriteJson(path.join(directory, EDITOR_MARKER), { editor: true, at: new Date().toISOString() })
+
+      this.logger?.info('Downloaded a Bedrock version', { version, package: entry.package, editor })
       const sizeBytes = await directorySize(directory)
       this.progress(version, { phase: 'done', receivedBytes: sizeBytes, totalBytes: sizeBytes, sizeBytes })
-      return { version, package: entry.package, directory, sizeBytes }
+      return { version, package: entry.package, directory, sizeBytes, editor: Boolean(editor) }
     } catch (error) {
       await fsp.rm(archive, { force: true }).catch(() => {})
       const message = controller.signal.aborted ? 'The download was cancelled.' : error.message

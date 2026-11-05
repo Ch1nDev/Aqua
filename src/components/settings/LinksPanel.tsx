@@ -62,7 +62,7 @@ export function LinksPanel() {
 
       <p className="settings-hint">
         {status?.portable
-          ? 'Portable mode leaves Windows associations alone: Aqua does not register an aqua:// handler, so links from other apps are unavailable. The CLI still works from the Aqua folder; register the protocol from a non-portable copy if you need browser or Discord links.'
+          ? 'Portable mode leaves Windows associations alone: Aqua does not register an aqua:// handler or .mrpack, .mcpack, .mcaddon and .mcworld file types, so links from other apps are unavailable. The CLI still works from the Aqua folder; use a non-portable install if you need browser, Discord or file associations.'
           : 'Deep links open Aqua and ask before launching or installing anything. The CLI accepts the same actions; pass --yes only in scripts you trust. A command sent to an already running launcher is forwarded to that window instead of starting a second copy.'}
       </p>
 
@@ -89,8 +89,11 @@ export function LinksPanel() {
         <Terminal />
         <span>
           <code>aqua status --json</code> prints local profile names, versions and loader types only — never tokens,
-          account secrets or file paths. Uninstalling Aqua removes the app but Windows can keep a stale <code>aqua://</code>{' '}
-          entry under Default apps; reinstall or remove it there to clear it.
+          account secrets or file paths. Windows file associations are installed with the app: a double-clicked
+          <code>.mrpack</code>, <code>.mcpack</code>, <code>.mcaddon</code> or <code>.mcworld</code> still opens the
+          confirmation sheet, and the source file is left untouched. Uninstalling Aqua removes the app but Windows can
+          keep a stale <code>aqua://</code> or file-association entry under Default apps; reinstall or remove it there to
+          clear it.
         </span>
       </p>
     </div>

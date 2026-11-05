@@ -457,6 +457,16 @@ export function ModsPage() {
     return () => window.clearTimeout(timer)
   }, [query, contentType, installationId, isModpack, moddable, needsLoader, runSearch])
 
+  // Declared above the edition early returns so every render runs the same hooks.
+  const gameVersionOptions = useMemo(() => {
+    const ids = (versionManifest?.versions ?? [])
+      .filter((version) => version.type === 'release')
+      .map((version) => version.id)
+    if (profileVersion && !ids.includes(profileVersion)) ids.unshift(profileVersion)
+    if (filters.gameVersion && !ids.includes(filters.gameVersion)) ids.unshift(filters.gameVersion)
+    return ids
+  }, [filters.gameVersion, profileVersion, versionManifest])
+
   const performInstall = async (hit: ModrinthHit, worldFolder: string | null) => {
     if (!installationId) return
     setInstalling(hit.id)
@@ -626,7 +636,6 @@ export function ModsPage() {
       <div className="page">
         <PageHeader
           title="Extra content"
-          subtitle="Browse Bedrock add-on sites in the launcher, or import .mcpack and .mcaddon files you already have."
         />
         <EditionSwitch edition={edition} onChange={setEdition} />
         <BedrockAddonsPanel />
@@ -639,7 +648,6 @@ export function ModsPage() {
       <div className="page">
         <PageHeader
           title="Extra content"
-          subtitle="Browse playhorizon.dev in the launcher and manage the mods, native bundles, and resource packs Horizon loads."
         />
         <EditionSwitch edition={edition} onChange={setEdition} />
         <HorizonModsPanel />
@@ -650,7 +658,7 @@ export function ModsPage() {
   if (!selectedInstallation && !isModpack) {
     return (
       <div className="page">
-        <PageHeader title={MODRINTH_TITLE} subtitle="Browse Modrinth and manage the content in your profile." />
+        <PageHeader title={MODRINTH_TITLE} />
         <EditionSwitch edition={edition} onChange={setEdition} />
         <div className="panel">
           <EmptyState
@@ -668,7 +676,6 @@ export function ModsPage() {
       <div className="page">
         <PageHeader
           title={MODRINTH_TITLE}
-          subtitle={`${selectedInstallation?.name ?? 'This installation'} runs vanilla Minecraft. Resource packs, shaders and modpacks work without a loader.`}
         />
         <EditionSwitch edition={edition} onChange={setEdition} />
         <div className="panel">
@@ -703,15 +710,6 @@ export function ModsPage() {
         }`
       : `No profile selected · ${loaderLabel}`
 
-  const gameVersionOptions = useMemo(() => {
-    const ids = (versionManifest?.versions ?? [])
-      .filter((version) => version.type === 'release')
-      .map((version) => version.id)
-    if (profileVersion && !ids.includes(profileVersion)) ids.unshift(profileVersion)
-    if (filters.gameVersion && !ids.includes(filters.gameVersion)) ids.unshift(filters.gameVersion)
-    return ids
-  }, [filters.gameVersion, profileVersion, versionManifest])
-
   const categoryOptions = FILTER_CATEGORIES[contentType]
   const activeFilterLabels = [
     ...categoryOptions.filter((category) => filters.categories.includes(category.id)).map((category) => category.label),
@@ -738,15 +736,13 @@ export function ModsPage() {
     <div className="page">
       <PageHeader
         title={MODRINTH_TITLE}
-        subtitle={
-          isModpack
-            ? 'Browse Modrinth modpacks. Each install creates a separate profile you can launch right away.'
-            : selectedInstallation
-              ? `Browse Modrinth ${typeOption.plural} for Minecraft ${selectedInstallation.versionId}${
-                  contentType === 'mod' ? ` on ${loaderLabel}` : ''
-                }.`
-              : `Browse Modrinth ${typeOption.plural}.`
-        }
+        {...(selectedInstallation
+          ? {
+              subtitle: `Minecraft ${selectedInstallation.versionId}${
+                contentType === 'mod' ? ` · ${loaderLabel}` : ''
+              }`,
+            }
+          : {})}
         actions={
           <div className="row gap-2">
             {!isModpack ? (
@@ -1294,7 +1290,6 @@ export function ModsPage() {
         open={Boolean(worldPickerHit)}
         onClose={() => setWorldPickerHit(null)}
         title="Choose a world"
-        subtitle="Datapacks live inside one world. Pick where this pack should be installed."
         size="sm"
         footer={
           <>

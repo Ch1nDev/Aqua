@@ -16,6 +16,7 @@ export class JobManager {
     emitActivity,
     emitNotification,
     emitInstallations,
+    onJobFinished,
   }) {
     this.store = store
     this.installer = installer
@@ -26,6 +27,7 @@ export class JobManager {
     this.emitActivity = emitActivity
     this.emitNotification = emitNotification
     this.emitInstallations = emitInstallations
+    this.onJobFinished = onJobFinished
     this.jobs = []
     this.running = false
     this.activeJob = null
@@ -158,6 +160,42 @@ export class JobManager {
   }
 
   /** Local modpack import/copy; the runner owns validation and rollback. */
+  /** One cancellable verify-all pass across installed profiles. */
+  enqueueMaintenance({ run, title, subtitle }) {
+    const job = {
+      id: randomId(),
+      type: 'maintenance',
+      installationId: null,
+      installationName: null,
+      versionId: null,
+      title: title || 'Verifying installations',
+      subtitle: subtitle || 'Checking game files for every installed profile',
+      status: 'queued',
+      stage: 'Queued',
+      progress: null,
+      indeterminate: true,
+      bytesDone: 0,
+      bytesTotal: 0,
+      filesDone: 0,
+      filesTotal: 0,
+      speedBps: 0,
+      etaSeconds: null,
+      currentFile: null,
+      error: null,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+      abortController: null,
+      runner: run,
+    }
+    this.jobs.unshift(job)
+    this.jobs = this.jobs.slice(0, 30)
+    this.emitJobs()
+    this.drain()
+    return publicJob(job)
+  }
+
+  /** Local modpack import/copy; the runner owns validation and rollback. */
   enqueueModpackImport({ title, subtitle, run }) {
     const job = {
       id: randomId(),
@@ -238,6 +276,13 @@ export class JobManager {
       this.emitJobs()
       return publicJob(job)
     }
+    if (job.type === 'maintenance') {
+      // Cancellation is cooperative: the current profile is allowed to finish.
+      job.cancelRequested = true
+      job.stage = 'Finishing current profile…'
+      this.emitJobs()
+      return publicJob(job)
+    }
     job.cancelRequested = true
     job.stage = 'Cancelling…'
     this.emitJobs()
@@ -271,7 +316,36 @@ export class JobManager {
     this.emitJobs()
 
     try {
-      if (job.type === 'backup' || job.type === 'modpack-import' || job.type === 'launcher-import') {
+      if (job.type === 'maintenance') {
+        const result = await job.runner({
+          shouldStop: () => job.cancelRequested,
+          onProgress: (update) => this.updateJob(job, update),
+        })
+        job.result = result || null
+        const cancelled = job.cancelRequested || result?.cancelled === true
+        job.status = cancelled ? 'cancelled' : 'completed'
+        job.stage = cancelled ? 'Cancelled after the current profile' : 'Verification complete'
+        job.progress = 100
+        job.indeterminate = false
+        job.finishedAt = new Date().toISOString()
+        job.speedBps = 0
+        job.etaSeconds = 0
+        this.emitNotification({
+          level: cancelled ? 'info' : result?.failed ? 'warning' : 'success',
+          title: cancelled ? 'Maintenance cancelled' : 'Verification complete',
+          message:
+            String(result?.checked ?? 0) +
+            ' of ' +
+            String(result?.total ?? 0) +
+            ' installed profile' +
+            (result?.total === 1 ? '' : 's') +
+            ' checked' +
+            (result?.repaired ? ', ' + result.repaired + ' repaired' : '') +
+            '.',
+          dedupeKey: 'job:' + job.id + ':maintenance',
+          action: { page: 'settings', label: 'Open settings' },
+        })
+      } else if (job.type === 'backup' || job.type === 'modpack-import' || job.type === 'launcher-import') {
         const result = await job.runner({
           signal: job.abortController.signal,
           onProgress: (update) => this.updateJob(job, update),
@@ -446,6 +520,8 @@ export class JobManager {
                   title: `${job.installationName} installation failed`,
                   notification: 'Installation failed',
                 }
+                : job.type === 'maintenance'
+                  ? { type: 'install', title: 'Maintenance failed', notification: 'Maintenance failed' }
               : { type: 'java', title: 'Java runtime installation failed', notification: 'Java installation failed' }
         await this.store.addActivity({
           type: failure.type,
@@ -471,6 +547,7 @@ export class JobManager {
       this.running = false
       this.activeJob = null
       this.emitJobs()
+      this.onJobFinished?.(publicJob(job))
       setTimeout(() => this.drain(), 25)
     }
   }

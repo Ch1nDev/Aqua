@@ -140,6 +140,19 @@ function normalizeServer(raw) {
   }
 }
 
+function normalizeSkin(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const slug = typeof raw.slug === 'string' ? raw.slug.trim() : ''
+  if (!slug) return null
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim().slice(0, 64) : slug.slice(0, 64),
+    slug: slug.slice(0, 120),
+    name: (typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : slug).slice(0, 80),
+    model: raw.model === 'slim' ? 'slim' : 'classic',
+    textureDataUrl: typeof raw.textureDataUrl === 'string' ? raw.textureDataUrl : null,
+  }
+}
+
 function normalizeAccount(raw) {
   if (!raw || typeof raw !== 'object') return null
   if (!raw.id || !raw.name || !raw.uuid) return null
@@ -155,6 +168,7 @@ function normalizeAccount(raw) {
     expiresAt: type === 'offline' ? null : raw.expiresAt || null,
     sessionExpired: type === 'offline' ? false : Boolean(raw.sessionExpired),
     avatarDataUrl: typeof raw.avatarDataUrl === 'string' ? raw.avatarDataUrl : null,
+    skin: normalizeSkin(raw.skin),
   }
 }
 
@@ -286,6 +300,28 @@ export class Store {
     this.data.settings = settings
     await this.save()
     return this.data.settings
+  }
+
+  /**
+   * Return the launcher to first-run state without touching accounts, their
+   * encrypted tokens or anything on disk outside launcher.json.
+   */
+  async resetLauncherData(settings = this.defaults) {
+    this.data = {
+      schemaVersion: SCHEMA_VERSION,
+      settings: normalizeSettings(settings, this.defaults),
+      installations: [],
+      activeInstallationId: null,
+      accounts: this.data.accounts,
+      activeAccountId: this.data.activeAccountId,
+      servers: [],
+      activity: [],
+      sessions: [],
+      notifications: [],
+      crashes: [],
+    }
+    await this.save()
+    return this.data
   }
 
   async addInstallation(installation) {
@@ -500,6 +536,7 @@ export class Store {
       expiresAt: account.expiresAt,
       sessionExpired: account.sessionExpired,
       avatarDataUrl: account.avatarDataUrl,
+      skin: account.skin || null,
       isActive: account.id === this.data.activeAccountId,
     }
   }

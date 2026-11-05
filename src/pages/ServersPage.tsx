@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   Boxes,
   Clock,
-  Info,
   Layers,
   Loader2,
   Pencil,
@@ -270,7 +269,6 @@ export function ServersPage() {
     <div className="page">
       <PageHeader
         title="Servers"
-        subtitle="Save the servers you play on, watch their live status, and join in one click."
         actions={
           <div className="row gap-2">
             <Button
@@ -590,14 +588,6 @@ export function ServersPage() {
         </div>
       )}
 
-      <div className="callout callout--info servers-footnote">
-        <Info />
-        <span>
-          Java servers: offline profiles can only join servers with <span className="mono">online-mode=false</span>.
-          Online-mode servers require Microsoft sign-in, which is currently unavailable in Aqua. Bedrock servers always
-          sign in with the Xbox profile the Store edition is already using.
-        </span>
-      </div>
 
       <Modal
         open={dialog !== null}

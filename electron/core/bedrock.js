@@ -33,6 +33,24 @@ const EDITIONS = [
     roamingFolder: 'Minecraft Bedrock Preview',
     packageFamilyName: 'Microsoft.MinecraftWindowsBeta_8wekyb3d8bbwe',
   },
+  // Editor is a mode of the installed game rather than a package of its own, so
+  // each Store edition offers one. Windows opens it through the creator URI.
+  {
+    id: 'bedrock-editor',
+    packageName: 'Microsoft.MinecraftUWP',
+    name: 'Minecraft Editor',
+    roamingFolder: 'Minecraft Bedrock',
+    packageFamilyName: 'Microsoft.MinecraftUWP_8wekyb3d8bbwe',
+    editorUri: 'minecraft://creator/?Editor=true',
+  },
+  {
+    id: 'bedrock-preview-editor',
+    packageName: 'Microsoft.MinecraftWindowsBeta',
+    name: 'Minecraft Preview Editor',
+    roamingFolder: 'Minecraft Bedrock Preview',
+    packageFamilyName: 'Microsoft.MinecraftWindowsBeta_8wekyb3d8bbwe',
+    editorUri: 'minecraft-preview://creator/?Editor=true',
+  },
 ]
 
 const STORE_URL = 'https://apps.microsoft.com/detail/9nblggh2jhxj'
@@ -118,6 +136,35 @@ function activateApp(userModelId) {
     child.once('exit', (code) => {
       clearTimeout(timer)
       finish(code == null || code < 2 ? { ok: true, code } : { ok: false, error: `explorer.exe exited with code ${code}` })
+    })
+  })
+}
+
+/**
+ * Opens a protocol URL through the Windows shell. Electron's own ShellExecute call
+ * rejects some custom-protocol links (0x10B "directory name is invalid"), while
+ * `start` goes through the same association machinery the Start menu uses.
+ */
+function startProtocolUri(uri) {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      resolve(result)
+    }
+    const child = spawn('cmd.exe', ['/c', 'start', '', uri], { windowsHide: true, stdio: 'ignore' })
+    const timer = setTimeout(() => {
+      child.kill()
+      finish({ ok: true })
+    }, 15000)
+    child.once('error', (error) => {
+      clearTimeout(timer)
+      finish({ ok: false, error: error.message })
+    })
+    child.once('exit', (code) => {
+      clearTimeout(timer)
+      finish(code == null || code === 0 ? { ok: true } : { ok: false, error: `cmd exited with code ${code}` })
     })
   })
 }
@@ -290,6 +337,8 @@ function toEdition(edition, record, dataRoot) {
     installLocation: typeof record.InstallLocation === 'string' ? record.InstallLocation : null,
     status: cleanText(record.Status, 40) || null,
     appUserModelId: appUserModelId(record.PackageFamilyName || edition.packageFamilyName, appIds),
+    editor: Boolean(edition.editorUri),
+    editorUri: edition.editorUri || null,
     dataRoot: dataRoot.dataRoot,
     dataRootExists: dataRoot.exists,
     worldsDirectory: path.join(dataRoot.dataRoot, 'minecraftWorlds'),
@@ -317,9 +366,11 @@ export class BedrockService {
         title: serverAddress ? `Joined ${serverAddress}` : `Launched ${edition.name}`,
         detail: serverAddress
           ? `Bedrock server · ${edition.name}`
-          : edition.version
-            ? `Minecraft Bedrock ${edition.version} · Store edition`
-            : 'Microsoft Store edition',
+          : edition.editor
+            ? 'Creator mode · Included with Minecraft'
+            : edition.version
+              ? `Minecraft Bedrock ${edition.version} · Store edition`
+              : 'Microsoft Store edition',
         installationId: null,
         status: serverAddress ? 'info' : 'success',
       })
@@ -337,6 +388,7 @@ export class BedrockService {
         supported: process.platform === 'win32',
         editions: this.cache.editions,
         developerMode: this.cache.developerMode,
+        stubs: this.cache.stubs || [],
         storeUrl: STORE_URL,
       }
     }
@@ -350,20 +402,29 @@ export class BedrockService {
   async detect() {
     const supported = process.platform === 'win32'
     if (!supported) {
-      return { supported: false, editions: [], developerMode: null, storeUrl: STORE_URL }
+      return { supported: false, editions: [], developerMode: null, stubs: [], storeUrl: STORE_URL }
     }
     const { packages: records, developerMode } = await detectState()
     const editions = []
+    /** Packages Windows lists without any files: a queued Store download, not an install. */
+    const stubs = []
     for (const edition of EDITIONS) {
       const record = records.find((item) => String(item?.Name || '').toLowerCase() === edition.packageName.toLowerCase())
       if (!record) continue
+      // The Store lists a package as soon as a download is queued. Until its files
+      // are on disk there is nothing to start and no handler for its links, so a
+      // stub is not an installation.
+      if (!String(record.InstallLocation || '').trim()) {
+        if (!stubs.includes(edition.packageName)) stubs.push(edition.packageName)
+        continue
+      }
       const dataRoot = await resolveDataRoot(edition, {
         preferUwp: usesUwpDataFolder(record.Version),
       })
       editions.push(toEdition(edition, record, dataRoot))
     }
-    this.cache = { at: Date.now(), editions, developerMode }
-    return { supported, editions, developerMode, storeUrl: STORE_URL }
+    this.cache = { at: Date.now(), editions, developerMode, stubs }
+    return { supported, editions, developerMode, stubs, storeUrl: STORE_URL }
   }
 
   async find(id) {
@@ -374,14 +435,46 @@ export class BedrockService {
   }
 
   /**
+   * Opens a game protocol link, trying the shell's own association handler when
+   * Electron's call is refused, and naming the link when Windows has no handler.
+   */
+  async openProtocol(uri, edition = null) {
+    let firstError = null
+    try {
+      await this.openExternal(uri)
+      return
+    } catch (error) {
+      firstError = error
+    }
+    const fallback = await startProtocolUri(uri)
+    if (fallback.ok) {
+      this.logger?.info('Opened a protocol link through the Windows shell', { uri })
+      return
+    }
+    const name = edition?.name || 'Minecraft for Windows'
+    throw new Error(
+      `Windows has no working handler for ${uri}, so ${name} cannot start from it (${firstError?.message || fallback.error}). Install ${name} from the Microsoft Store, or register the build here, then try again.`,
+    )
+  }
+
+  /**
    * Starts Bedrock, or hands a server address to the game's deep link handler so
    * it connects on load.
    */
   async launch(id, { serverAddress = null } = {}) {
     const edition = await this.find(id)
+    // Editor mode is the game's own creator entry point, not a separate package:
+    // only the URI can start it, and only the version it belongs to answers.
+    if (edition.editor) {
+      if (!edition.editorUri) throw new Error('That Editor mode is not available.')
+      await this.openProtocol(edition.editorUri, edition)
+      this.logger?.info('Opened Minecraft Editor', { edition: edition.name, uri: edition.editorUri })
+      await this.recordLaunch(edition)
+      return { mode: 'launch', editionId: edition.id, editor: true, url: edition.editorUri, appUserModelId: null }
+    }
     if (serverAddress) {
       const url = bedrockDeepLink(serverAddress)
-      await this.openExternal(url)
+      await this.openProtocol(url, edition)
       this.logger?.info('Joining Bedrock server', { edition: edition.name, address: serverAddress })
       await this.recordLaunch(edition, serverAddress)
       return { mode: 'join', address: serverAddress, url, editionId: edition.id }
@@ -404,7 +497,7 @@ export class BedrockService {
     }
 
     // A registered URI handler is the fallback when the app cannot be activated.
-    await this.openExternal('minecraft://')
+    await this.openProtocol('minecraft://', edition)
     await this.recordLaunch(edition)
     return { mode: 'launch', editionId: edition.id, appUserModelId: null }
   }

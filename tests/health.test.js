@@ -127,6 +127,15 @@ test('a missing declared dependency is reported by name', async (t) => {
   assert.match(dependency.detail, /Create Addon needs create/)
 })
 
+test('a 32-bit Java runtime is an error with a settings action', async (t) => {
+  const data = await fixture(t)
+  data.javaService.detect = async () => [{ major: 21, arch: 'x86', path: '/java' }]
+  const result = await checkInstallation(data, { totalMemMb: 16_384, freeBytes: 10 * 1024 * 1024 * 1024 })
+  const javaArch = byId(result, 'java-arch')
+  assert.equal(javaArch.status, 'error')
+  assert.equal(javaArch.fix.kind, 'open-settings')
+})
+
 test('worstStatus ranks errors above warnings and warnings above unknown', () => {
   assert.equal(worstStatus([{ status: 'ok' }, { status: 'unknown' }]), 'unknown')
   assert.equal(worstStatus([{ status: 'unknown' }, { status: 'warn' }]), 'warn')

@@ -261,6 +261,8 @@ export class ArtworkService {
     this.pendingDrops = null
     this.notes = new Map()
     this.aquaMisses = new Map()
+    this.randomArt = undefined
+    this.pendingRandomArt = null
   }
 
   async getPatchNotes({ force = false } = {}) {
@@ -553,6 +555,46 @@ export class ArtworkService {
         message: error.message,
       })
       return []
+    }
+  }
+
+  /**
+   * Key art for one randomly chosen release, used as the backdrop of the
+   * browser-facing sign-in pages. Aqua's own artwork endpoint is preferred: it
+   * is one small PNG per version and needs no wallpaper download. The result is
+   * remembered so every page of one sign-in shows the same backdrop.
+   */
+  async getRandomVersionArt({ attempts = 4, fresh = false } = {}) {
+    if (fresh) this.randomArt = undefined
+    if (this.randomArt !== undefined) return this.randomArt
+    if (this.pendingRandomArt) return this.pendingRandomArt
+    this.pendingRandomArt = (async () => {
+      let releases = []
+      try {
+        const manifest = await this.versions?.getManifest?.()
+        releases = (Array.isArray(manifest?.versions) ? manifest.versions : [])
+          .filter((entry) => entry?.type === 'release' && /^\d+\.\d+/.test(String(entry?.id || '')))
+          .map((entry) => String(entry.id))
+      } catch (error) {
+        this.logger.debug('Could not list releases for sign-in artwork', { message: error.message })
+      }
+      for (let index = 0; index < attempts && releases.length; index += 1) {
+        const [versionId] = releases.splice(Math.floor(Math.random() * releases.length), 1)
+        const art = await this.aquaArtwork(versionId).catch(() => null)
+        if (art?.bytes?.length) {
+          return {
+            version: art.version,
+            dataUrl: 'data:' + art.mime + ';base64,' + art.bytes.toString('base64'),
+          }
+        }
+      }
+      return null
+    })()
+    try {
+      this.randomArt = await this.pendingRandomArt
+      return this.randomArt
+    } finally {
+      this.pendingRandomArt = null
     }
   }
 

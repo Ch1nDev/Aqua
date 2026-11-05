@@ -366,9 +366,19 @@ export async function pingServer(address, { timeoutMs = 5000, edition = 'java' }
 }
 
 export class ServerService {
-  constructor({ store, logger }) {
+  constructor({ store, logger, onChange = null }) {
     this.store = store
     this.logger = logger
+    this.onChange = onChange
+  }
+
+  notifyChange() {
+    if (typeof this.onChange !== 'function') return
+    try {
+      this.onChange()
+    } catch (error) {
+      this.logger?.warn('Could not refresh server launcher surfaces', { message: error.message })
+    }
   }
 
   list() {
@@ -420,6 +430,7 @@ export class ServerService {
       edition: target.edition,
       installationId: boundInstallationId,
     })
+    this.notifyChange()
     return this.store.publicServer(server)
   }
 
@@ -440,12 +451,14 @@ export class ServerService {
       updates.installationId = this.bindingFor(patch.installationId, edition)
     }
     await this.store.updateServer(id, updates)
+    this.notifyChange()
     return this.store.publicServer(this.store.getServer(id))
   }
 
   async remove(id) {
     if (typeof id !== 'string' || !id.trim()) throw new Error('Server ID is required.')
     const removed = await this.store.removeServer(id)
+    this.notifyChange()
     return { id: removed.id, name: removed.name }
   }
 
@@ -455,6 +468,7 @@ export class ServerService {
 
   async markJoined(id) {
     const server = await this.store.markServerJoined(id)
+    this.notifyChange()
     return this.store.publicServer(server)
   }
 }

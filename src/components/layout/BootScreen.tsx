@@ -1,7 +1,7 @@
 import { AlertTriangle, FolderOpen, RefreshCw } from 'lucide-react'
 import { api } from '../../lib/api'
 import { AppIcon } from '../brand/Brand'
-import { Button, ProgressBar } from '../ui/primitives'
+import { Button, Spinner } from '../ui/primitives'
 
 export function BootScreen({
   error,
@@ -10,6 +10,14 @@ export function BootScreen({
   error?: string | null
   onRetry?: () => void
 }) {
+  if (!error) {
+    return (
+      <div className="boot-screen">
+        <Spinner size="lg" label="Starting Aqua Launcher" />
+      </div>
+    )
+  }
+
   return (
     <div className="boot-screen">
       <div className="boot-screen__glow" />
@@ -17,33 +25,20 @@ export function BootScreen({
         <AppIcon size={60} />
         <div className="boot-screen__text">
           <span className="boot-screen__eyebrow">AQUA LAUNCHER</span>
-          <h1>{error ? 'Something went wrong' : 'Preparing your launcher'}</h1>
-          <p>
-            {error
-              ? error
-              : 'Connecting to Minecraft services and loading your installations.'}
-          </p>
+          <h1>Something went wrong</h1>
+          <p>{error}</p>
         </div>
-        {error ? (
-          <>
-            <div className="boot-screen__error-icon">
-              <AlertTriangle />
-            </div>
-            <div className="boot-screen__actions">
-              <Button variant="primary" icon={<RefreshCw />} onClick={onRetry}>
-                Try again
-              </Button>
-              <Button icon={<FolderOpen />} onClick={() => void api.system.openFolder('logs').catch(() => {})}>
-                Open logs
-              </Button>
-            </div>
-          </>
-        ) : (
-          <div className="boot-screen__progress">
-            <ProgressBar value={null} label="Starting Aqua Launcher" />
-            <span>Starting securely…</span>
-          </div>
-        )}
+        <div className="boot-screen__error-icon">
+          <AlertTriangle />
+        </div>
+        <div className="boot-screen__actions">
+          <Button variant="primary" icon={<RefreshCw />} onClick={onRetry}>
+            Try again
+          </Button>
+          <Button icon={<FolderOpen />} onClick={() => void api.system.openFolder('logs').catch(() => {})}>
+            Open logs
+          </Button>
+        </div>
       </div>
     </div>
   )

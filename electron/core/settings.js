@@ -5,6 +5,7 @@ import { assertAbsolutePath, assertSafeGameDirectory, clamp, parseArguments, par
 import { recommendMaxRam } from './system.js'
 import { normalizeBackupPolicy } from './backup-scheduler.js'
 import { normalizeContentFilters } from './modrinth.js'
+import { DEFAULT_LAUNCHER_WINDOW, normalizeWindowPlacement } from './window-placement.js'
 
 export const THEMES = ['midnight', 'slate']
 export const ACCENTS = ['aqua', 'ocean', 'steel']
@@ -53,10 +54,14 @@ export function createDefaultSettings({ totalMemMb, instancesRoot }) {
     },
     defaultGameDir: instancesRoot,
     downloads: { concurrency: 8, bandwidthKbps: 0 },
-    window: { width: 1280, height: 720, fullscreen: false },
+    window: {
+      width: 1280,
+      height: 720,
+      fullscreen: false,
+      placement: { ...DEFAULT_LAUNCHER_WINDOW },
+    },
     jvmArgs: '',
     gameArgs: '',
-    microsoftClientId: '',
     minecraftSettings: { sync: true },
     backups: normalizeBackupPolicy({}),
     contentFilters: {},
@@ -176,10 +181,10 @@ export function normalizeSettings(raw, defaults) {
       width: asInt(window.width, base.window.width),
       height: asInt(window.height, base.window.height),
       fullscreen: asBoolean(window.fullscreen, base.window.fullscreen),
+      placement: normalizeWindowPlacement(window.placement, base.window?.placement || DEFAULT_LAUNCHER_WINDOW),
     },
     jvmArgs: asString(source.jvmArgs, base.jvmArgs),
     gameArgs: asString(source.gameArgs, base.gameArgs),
-    microsoftClientId: asString(source.microsoftClientId, base.microsoftClientId).trim(),
     minecraftSettings: {
       sync: asBoolean(minecraftSettings.sync, base.minecraftSettings?.sync ?? true),
     },
@@ -288,11 +293,6 @@ export async function validateSettings(settings, context) {
     settings.backups.maxTotalMb > 102_400
   ) {
     errors.push('The backup storage limit must be between 0 and 102,400 MB.')
-  }
-
-  const clientId = settings.microsoftClientId
-  if (clientId && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(clientId)) {
-    errors.push('The Microsoft application (client) ID must be a valid GUID.')
   }
 
   try {

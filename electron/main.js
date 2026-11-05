@@ -7,6 +7,7 @@ import {
   dialog,
   nativeImage,
   net,
+  screen,
   session,
   shell,
 } from 'electron'
@@ -27,6 +28,7 @@ import { BedrockVersionsService } from './core/bedrock-versions.js'
 import { BlockTextureService } from './core/block-textures.js'
 import { ContentIndexService } from './core/content-index.js'
 import { DocImageService } from './core/doc-images.js'
+import { FactoryResetService } from './core/factory-reset.js'
 import { GameManager } from './core/game.js'
 import { HorizonService } from './core/horizon.js'
 import { HealthService } from './core/health.js'
@@ -36,10 +38,14 @@ import { InstallationService } from './core/installations.js'
 import { Installer } from './core/installer.js'
 import { JavaService } from './core/java.js'
 import { JobManager } from './core/jobs.js'
+import { buildJumpListCategories } from './core/jump-list.js'
+import { LaunchQueue } from './core/launch-queue.js'
 import { LanDiscoveryService } from './core/lan-discovery.js'
 import { LauncherImportService } from './core/launcher-import.js'
 import { LoaderService } from './core/loaders.js'
 import { LogService } from './core/logs.js'
+import { LogTail } from './core/log-tail.js'
+import { MaintenanceService } from './core/maintenance.js'
 import { MinecraftSettingsService } from './core/minecraft-settings.js'
 import { ModrinthService } from './core/modrinth.js'
 import { ModpackImportService } from './core/modpack-import.js'
@@ -51,11 +57,13 @@ import { ensureAppDirs, getPaths, getTrayIconPath, getWindowIconPath, setPortabl
 import { buildPortablePlan, preparePortableDataRoot } from './core/portable.js'
 import { DiscordPresence } from './core/discord-presence.js'
 import { ServerService } from './core/servers.js'
+import { SkinService } from './core/skins.js'
 import { ScreenshotService } from './core/screenshots.js'
 import { StorageService } from './core/storage.js'
 import { Store } from './core/store.js'
 import { getSystemInfo } from './core/system.js'
 import { VersionService } from './core/versions.js'
+import { clampWindowPlacement } from './core/window-placement.js'
 import { WorldsService } from './core/worlds.js'
 import {
   LINK_EXAMPLES,
@@ -121,6 +129,7 @@ let startHidden = false
 let quitting = false
 let rendererReady = false
 let pendingIntents = []
+let jumpListInstallations = []
 
 function getPreloadPath() {
   return path.join(__dirname, 'preload.cjs')
@@ -140,6 +149,28 @@ function showMainWindow() {
   mainWindow.show()
   mainWindow.focus()
   startHidden = false
+}
+
+/**
+ * Keeps Windows' jump list aligned with the profiles and servers that were
+ * just serialized for the renderer. Development and portable builds never
+ * write taskbar entries.
+ */
+function refreshJumpList() {
+  if (process.platform !== 'win32' || !app.isPackaged || portableState.active || !store) return
+  try {
+    const categories = buildJumpListCategories({
+      installations: jumpListInstallations,
+      servers: store.servers,
+      execPath: process.execPath,
+    })
+    const result = app.setJumpList(categories)
+    if (typeof result === 'string' && result !== 'ok') {
+      logger?.warn('Could not update the Windows jump list', { result })
+    }
+  } catch (error) {
+    logger?.warn('Could not update the Windows jump list', { message: error.message })
+  }
 }
 
 function protocolClientArguments() {
@@ -264,9 +295,13 @@ function createTray() {
 function createWindow() {
   rendererReady = false
   const iconPath = getWindowIconPath()
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const displays = [primaryDisplay, ...screen.getAllDisplays().filter((display) => display.id !== primaryDisplay.id)]
+  const placement = clampWindowPlacement(store?.settings?.window?.placement, displays)
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 880,
+    width: placement.width,
+    height: placement.height,
+    ...(placement.x === null || placement.y === null ? {} : { x: placement.x, y: placement.y }),
     minWidth: 1040,
     minHeight: 700,
     show: false,
@@ -296,6 +331,7 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => {
+    if (placement.maximized) mainWindow?.maximize()
     if (startHidden) {
       createTray()
       if (!tray) showMainWindow()
@@ -307,9 +343,66 @@ function createWindow() {
   const emitWindowState = () => {
     broadcast('windowState', { maximized: mainWindow?.isMaximized() || false })
   }
-  mainWindow.on('maximize', emitWindowState)
-  mainWindow.on('unmaximize', emitWindowState)
+  let placementSaveTimer = null
+  let closeAfterPlacementSave = false
+
+  const persistWindowPlacement = async () => {
+    const win = mainWindow
+    if (!win || win.isDestroyed() || !store) return
+    const bounds = win.isMaximized() ? win.getNormalBounds() : win.getBounds()
+    const settings = store.settings
+    await store.replaceSettings({
+      ...settings,
+      window: {
+        ...settings.window,
+        placement: {
+          x: Math.round(bounds.x),
+          y: Math.round(bounds.y),
+          width: Math.round(bounds.width),
+          height: Math.round(bounds.height),
+          maximized: win.isMaximized(),
+        },
+      },
+    })
+  }
+
+  const schedulePlacementSave = () => {
+    if (!store || !mainWindow || mainWindow.isDestroyed()) return
+    if (placementSaveTimer) clearTimeout(placementSaveTimer)
+    placementSaveTimer = setTimeout(() => {
+      placementSaveTimer = null
+      persistWindowPlacement().catch((error) =>
+        logger?.warn('Could not save the launcher window placement', { message: error.message }),
+      )
+    }, 250)
+  }
+
+  const onWindowState = () => {
+    emitWindowState()
+    schedulePlacementSave()
+  }
+  mainWindow.on('maximize', onWindowState)
+  mainWindow.on('unmaximize', onWindowState)
+  mainWindow.on('resize', schedulePlacementSave)
+  mainWindow.on('move', schedulePlacementSave)
+  mainWindow.on('close', (event) => {
+    if (closeAfterPlacementSave || !store) return
+    event.preventDefault()
+    closeAfterPlacementSave = true
+    if (placementSaveTimer) {
+      clearTimeout(placementSaveTimer)
+      placementSaveTimer = null
+    }
+    persistWindowPlacement()
+      .catch((error) => logger?.warn('Could not save the launcher window placement', { message: error.message }))
+      .finally(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+      })
+  })
   mainWindow.on('closed', () => {
+    if (placementSaveTimer) clearTimeout(placementSaveTimer)
+    placementSaveTimer = null
+    services?.logTail?.stopAll()
     mainWindow = null
     rendererReady = false
   })
@@ -399,6 +492,7 @@ async function initialize() {
   const healthService = new HealthService({ store, paths, javaService })
   const loaderService = new LoaderService({ paths, versionService, javaService, logger })
   const installer = new Installer({ paths, versionService, loaderService, logger })
+  const maintenanceService = new MaintenanceService({ store, installer, healthService, logger })
   const installationService = new InstallationService({
     paths,
     store,
@@ -409,13 +503,19 @@ async function initialize() {
   const logService = new LogService({ paths, store, logger })
   const minecraftSettingsService = new MinecraftSettingsService({ paths, store, logger })
   const worldsService = new WorldsService({ paths, store, logger })
-  const serverService = new ServerService({ store, logger })
+  const serverService = new ServerService({ store, logger, onChange: refreshJumpList })
   const lanDiscovery = new LanDiscoveryService({
     logger,
     onChange: (snapshot) => broadcast('servers:lan', snapshot),
   })
   const blockTextureService = new BlockTextureService({ paths, installationService, logger })
   const contentIndexService = new ContentIndexService({ paths, logger })
+  const logTail = new LogTail({
+    logService,
+    contentIndexService,
+    logger,
+    emit: (payload) => broadcast('logs:tail', payload),
+  })
   const storageService = new StorageService({
     paths,
     store,
@@ -483,7 +583,9 @@ async function initialize() {
       .catch(() => {})
       .then(async () => {
         const installations = await installationService.list()
+        jumpListInstallations = installations
         broadcast('installations', { installations })
+        refreshJumpList()
         return installations
       })
     installationEmitQueue.catch((error) => logger.error('Could not broadcast installations', { message: error.message }))
@@ -530,6 +632,9 @@ async function initialize() {
     const installation = game?.installationId ? store.getInstallation(game.installationId) : null
     discordPresence.updateFromGame(game, { loader: installation?.loader || null })
   }
+  const launchQueue = new LaunchQueue({
+    emit: (snapshot) => broadcast('launch-queue', snapshot),
+  })
   const emitSettings = (settings) => broadcast('settings', { settings })
   const emitAccounts = (payload) => broadcast('accounts', payload)
   const emitAuth = (auth) => broadcast('auth', auth)
@@ -538,12 +643,21 @@ async function initialize() {
     paths,
     store,
     logger,
+    artworkService,
     emitAccounts,
     emitAuth,
     emitActivity,
     emitNotification,
   })
   await accountManager.init()
+
+  const skinService = new SkinService({
+    paths,
+    store,
+    logger,
+    onAccountsChanged: () => accountManager.broadcastAccounts(),
+    snapshot: () => accountManager.accountsPayload(),
+  })
 
   const jobManager = new JobManager({
     store,
@@ -556,6 +670,15 @@ async function initialize() {
     emitInstallation: emitInstallations,
     emitNotification,
     emitInstallations,
+    // A queued launch can be waiting for this install to finish.
+    onJobFinished: (job) => {
+      if (job.type !== 'install') return
+      if (job.status === 'completed') {
+        void drainLaunchQueue()
+      } else if (launchQueue.peek()?.installationId === job.installationId) {
+        launchQueue.pause('The install for the next queued launch did not finish. Retry it when ready.')
+      }
+    },
   })
 
   const backupScheduler = new BackupScheduler({
@@ -602,7 +725,57 @@ async function initialize() {
     emitNotification,
     emitInstallations,
     restoreWindow: showMainWindow,
-    onSessionEnd: (session) => backupScheduler.onGameExit(session.installationId),
+    onSessionEnd: (session) => {
+      logTail.stopGame(session.installationId)
+      backupScheduler.onGameExit(session.installationId)
+      if (session.crashed) {
+        launchQueue.pause('The last game session closed unexpectedly. Retry the queue when you are ready.')
+      } else {
+        // Only a clean exit advances the queue. A crash is visible and paused.
+        void drainLaunchQueue()
+      }
+    },
+  })
+
+  async function drainLaunchQueue() {
+    if (launchQueue.snapshot().paused) return
+    const state = gameManager.getState()
+    if (state.status === 'preparing' || state.status === 'running') return
+    const next = launchQueue.peek()
+    if (!next) return
+    const installing = jobManager
+      .list()
+      .some(
+        (job) =>
+          job.type === 'install' &&
+          job.installationId === next.installationId &&
+          (job.status === 'running' || job.status === 'queued'),
+      )
+    if (installing) return
+    const entry = launchQueue.shift()
+    if (!entry) return
+    try {
+      await gameManager.launch(entry.installationId, { safeMode: entry.safeMode })
+    } catch (error) {
+      launchQueue.restore(entry)
+      launchQueue.pause(String(error?.message || 'The queued launch could not start.').slice(0, 400))
+    }
+  }
+
+  const factoryResetService = new FactoryResetService({
+    paths,
+    store,
+    getBlockingActivity: () => {
+      const game = gameManager.getState()
+      if (game.status === 'preparing' || game.status === 'running') {
+        return 'Close Minecraft before resetting Aqua.'
+      }
+      const activeJob = jobManager.list().find((job) => job.status === 'running' || job.status === 'queued')
+      if (activeJob) return `Wait for "${activeJob.title}" to finish before resetting Aqua.`
+      if (launchQueue.snapshot().entries.length) return 'Remove queued launches before resetting Aqua.'
+      if (backupScheduler.status().running) return 'Wait for the running backup to finish before resetting Aqua.'
+      return null
+    },
   })
 
   services = {
@@ -631,15 +804,20 @@ async function initialize() {
     installationService,
     javaService,
     healthService,
+    maintenanceService,
     accountManager,
+    skinService,
     jobManager,
+    launchQueue,
     backupScheduler,
     gameManager,
     discordPresence,
     logService,
+    logTail,
     blockTextureService,
     contentIndexService,
     storageService,
+    factoryResetService,
     screenshotService,
     systemInfo,
   }
@@ -648,6 +826,7 @@ async function initialize() {
 
   registerIpc({
     ...services,
+    drainLaunchQueue,
     emitInstallations,
     emitActivity,
     emitSettings,
@@ -689,6 +868,13 @@ async function initialize() {
   const startMinimized = store.settings.startup.startMinimized && process.argv.includes('--hidden')
   startHidden = startMinimized
   createWindow()
+  void installationService
+    .list()
+    .then((installations) => {
+      jumpListInstallations = installations
+      refreshJumpList()
+    })
+    .catch((error) => logger?.warn('Could not prepare the Windows jump list', { message: error.message }))
   backupScheduler.start()
   mainWindow?.on('focus', () => void backupScheduler.check())
 
@@ -744,6 +930,7 @@ app.whenReady().then(async () => {
 
   if (startupArgumentError) {
     printCliError(startupArgumentError)
+    if (app.isPackaged) dialog.showErrorBox('Aqua could not open that file', startupArgumentError.message)
     app.quit()
     return
   }
@@ -794,6 +981,7 @@ app.on('second-instance', (_event, argv) => {
     intent = parseCommandLine(argv)
   } catch (error) {
     logger?.warn('Ignored an invalid command line', { message: error.message })
+    if (app.isPackaged) dialog.showErrorBox('Aqua could not open that file', error.message)
     return
   }
   if (!intent) {
@@ -825,6 +1013,7 @@ app.on('before-quit', (event) => {
     return
   }
   try {
+    services?.logTail?.stopAll()
     services?.lanDiscovery?.stop()
     services?.accountManager?.dispose()
     services?.backupScheduler?.stop()

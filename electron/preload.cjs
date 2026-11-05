@@ -64,6 +64,15 @@ const api = {
     install: (id) => invoke('installations:install', { id }),
     openFolder: (id) => invoke('installations:openFolder', { id }),
   },
+  config: {
+    exportConfig: () => invoke('config:export'),
+    importConfig: () => invoke('config:import'),
+  },
+  reset: {
+    preview: () => invoke('reset:preview'),
+    apply: (token, confirmation) => invoke('reset:apply', { token, confirmation }),
+    cancel: () => invoke('reset:cancel'),
+  },
   settings: {
     update: (patch) => invoke('settings:update', patch),
   },
@@ -90,6 +99,10 @@ const api = {
     summary: () => invoke('health:summary'),
     fix: (installationId, kind) => invoke('health:fix', { installationId, kind }),
   },
+  maintenance: {
+    verifyAll: () => invoke('maintenance:verifyAll'),
+    cancel: () => invoke('maintenance:cancel'),
+  },
   content: {
     index: (installationId, contentType) => invoke('content:index', { installationId, contentType }),
     file: (installationId, contentType, filename) => invoke('content:file', { installationId, contentType, filename }),
@@ -105,6 +118,11 @@ const api = {
     switch: (id) => invoke('accounts:switch', { id }),
     signOut: (id) => invoke('accounts:signOut', { id }),
     refresh: (id) => invoke('accounts:refresh', { id }),
+  },
+  skins: {
+    list: (options = {}) => invoke('skins:list', options),
+    apply: (accountId, skin) => invoke('skins:apply', { accountId, skin }),
+    clear: (accountId) => invoke('skins:clear', { accountId }),
   },
   java: {
     detect: (options = {}) => invoke('java:detect', options),
@@ -162,10 +180,16 @@ const api = {
     cancel: () => invoke('storage:cancel'),
   },
   game: {
+    preflight: (installationId) => invoke('launch:preflight', { installationId }),
     launch: (installationId, serverAddress = null, safeMode = false) =>
       invoke('game:launch', { installationId, serverAddress, safeMode }),
     getState: () => invoke('game:getState'),
     recoverSafeMode: () => invoke('game:recoverSafeMode'),
+    queue: (installationId, safeMode = false, reason = 'manual') =>
+      invoke('launch:queue', { installationId, safeMode, reason }),
+    dequeue: (id) => invoke('launch:dequeue', { id }),
+    listQueue: () => invoke('launch:list'),
+    resumeQueue: () => invoke('launch:resume'),
   },
   crash: {
     last: () => invoke('crash:last'),
@@ -223,7 +247,7 @@ const api = {
     deleteBackup: (editionId, backupId) => invoke('bedrock:deleteBackup', { editionId, backupId }),
     versions: (options = {}) => invoke('bedrock:versions', options),
     versionsState: () => invoke('bedrock:versionsState'),
-    downloadVersion: (version) => invoke('bedrock:downloadVersion', { version }),
+    downloadVersion: (version, editor = false) => invoke('bedrock:downloadVersion', { version, editor }),
     cancelVersion: (version) => invoke('bedrock:cancelVersion', { version }),
     removeVersion: (version) => invoke('bedrock:removeVersion', { version }),
     openVersionFolder: (version) => invoke('bedrock:openVersionFolder', { version }),
@@ -238,6 +262,7 @@ const api = {
   logs: {
     list: () => invoke('logs:list'),
     read: (request) => invoke('logs:read', request),
+    tail: (request) => invoke('logs:tail', request),
     openFolder: (request = {}) => invoke('logs:openFolder', request),
     openFile: (request) => invoke('logs:openFile', request),
     exportDiagnostics: () => invoke('logs:exportDiagnostics'),
