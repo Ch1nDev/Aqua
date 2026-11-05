@@ -2,8 +2,6 @@
   <img src="https://aqua.ch1n.dev/assets/og.jpg" alt="Aqua Website: More ways to play!" width="100%">
 </p>
 
-## THIS DOES NOT PROMOTE PIRACY MICROSOFT MOJANG VALIDATION IS UNDER APPROVAL
-
 A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. Aqua manages game files and Java runtimes, keeps separate installation profiles, launches the game, and surfaces logs and crash reports without leaving the app. It also picks up Minecraft for Windows (Bedrock) from the Microsoft Store, so both editions can be launched from one place.
 
 ![Electron](https://img.shields.io/badge/Electron-45-2b2e3a)
